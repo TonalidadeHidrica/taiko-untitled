@@ -1,32 +1,60 @@
-use config::Config;
-use stainless_ffmpeg::format_context::FormatContext;
-use stainless_ffmpeg::stream::Stream;
+use config::{Config, ConfigError};
+use ffmpeg4::format;
+use ffmpeg4::util::{frame, media};
 use std::path::PathBuf;
-use stainless_ffmpeg_sys::AVMediaType::AVMEDIA_TYPE_VIDEO;
-use stainless_ffmpeg::video_decoder::VideoDecoder;
+use sdl2::pixels::PixelFormatEnum;
+use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 
-fn main() -> Result<(), String> {
-    let mut image_paths = Config::default();
-    let image_paths = image_paths
-        .merge(config::File::with_name("config.toml"))
-        .map_err(|x| x.to_string())?;
-    let image_path = image_paths
-        .get::<PathBuf>("video")
-        .map_err(|x| x.to_string())?;
+#[derive(Debug)]
+enum MainErr {
+    ConfigError(ConfigError),
+    StringError(String),
+    FFMpegError(ffmpeg4::Error),
+}
 
-    let mut format_context = FormatContext::new(image_path.to_str().unwrap())?;
-    format_context.open_input()?;
-    let video_stream_idx: isize = (0..format_context.get_nb_streams() as isize)
-        .filter(|x| format_context.get_stream_type(*x) == AVMEDIA_TYPE_VIDEO)
-        .next().ok_or("No video stream found")?;
-    // let video_stream = Stream::new(format_context.get_stream(video_stream_idx));
-    let video_decoder = VideoDecoder::new(String::new(), &format_context, video_stream_idx)?;
-    while let Ok(packet) = format_context.next_packet() {
-        if packet.get_stream_index() != video_stream_idx {
-            continue
+impl From<&str> for MainErr {
+    fn from(error: &str) -> Self {
+        MainErr::StringError(error.into())
+    }
+}
+
+impl From<ConfigError> for MainErr {
+    fn from(error: ConfigError) -> Self {
+        MainErr::ConfigError(error)
+    }
+}
+
+impl From<ffmpeg4::Error> for MainErr {
+    fn from(error: ffmpeg4::Error) -> Self {
+        MainErr::FFMpegError(error)
+    }
+}
+
+fn main() -> Result<(), MainErr> {
+    let mut config = Config::default();
+    let config = config.merge(config::File::with_name("config.toml"))?;
+    let video_path = config.get::<PathBuf>("video")?;
+
+    let mut input_context = format::input(&video_path)?;
+    let stream = input_context
+        .streams()
+        .best(media::Type::Video)
+        .ok_or("No video stream found")?;
+    let stream_index = stream.index();
+
+    let mut decoder = stream.codec().decoder().video()?;
+    decoder.set_parameters(stream.parameters())?;
+
+    let mut frame = frame::Video::empty();
+    for (_, packet) in input_context
+        .packets()
+        .filter(|(x, _)| x.index() == stream_index)
+    {
+        if !decoder.decode(&packet, &mut frame)? {
+            continue;
         }
-        let frame = video_decoder.decode(&packet)?;
-        println!("Frame: pts={}", frame.get_pts());
+        let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
+        assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
     }
 
     Ok(())
