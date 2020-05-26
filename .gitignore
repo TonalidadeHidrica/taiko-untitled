@@ -16,4 +16,4 @@
 
 # End of https://www.gitignore.io/api/Rust
 
-/image_paths.toml
+/config.toml
