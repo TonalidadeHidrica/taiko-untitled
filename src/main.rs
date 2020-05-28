@@ -6,6 +6,7 @@ use sdl2::pixels::PixelFormatEnum;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
+use std::time::Instant;
 
 #[derive(Debug)]
 struct MainErr(String);
@@ -52,29 +53,29 @@ fn main() -> Result<(), MainErr> {
         texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), 1280, 720)?;
 
     let mut frame = frame::Video::empty();
-    for (_, packet) in input_context
+
+    let mut packet_iterator = input_context
         .packets()
-        .filter(|(x, _)| x.index() == stream_index)
-    {
-        if !decoder.decode(&packet, &mut frame)? {
-            continue;
-        }
-        let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
-        assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
-        texture.update_yuv(
-            None,
-            frame.data(0),
-            frame.stride(0),
-            frame.data(1),
-            frame.stride(1),
-            frame.data(2),
-            frame.stride(2),
-        )?;
-        break;
-    }
+        .filter(|(x, _)| x.index() == stream_index);
 
     'main: loop {
-        canvas.copy(&texture, None, None)?;
+        if let Some((_, packet)) = packet_iterator.next() {
+            if decoder.decode(&packet, &mut frame)? {
+                let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
+                assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
+                texture.update_yuv(
+                    None,
+                    frame.data(0),
+                    frame.stride(0),
+                    frame.data(1),
+                    frame.stride(1),
+                    frame.data(2),
+                    frame.stride(2),
+                )?;
+                canvas.copy(&texture, None, None)?;
+            }
+        }
+
         canvas.present();
 
         for event in event_pump.poll_iter() {
