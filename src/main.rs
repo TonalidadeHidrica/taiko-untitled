@@ -5,11 +5,12 @@ use ffmpeg4::util::{frame, media};
 use ffmpeg4::{format, Packet};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::rect::Rect;
+use sdl2::pixels::{Color, PixelFormatEnum};
+use sdl2::rect::{Point, Rect};
 use std::cmp::max;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::time::Instant;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 
 #[derive(Debug)]
@@ -66,8 +67,8 @@ impl<'a> VideoReader<'a> {
 }
 
 fn main() -> Result<(), MainErr> {
-    let width = 1280;
-    let height = 720;
+    let width = 1280u32;
+    let height = 720u32;
 
     let mut config = Config::default();
     let config = config.merge(config::File::with_name("config.toml"))?;
@@ -85,6 +86,7 @@ fn main() -> Result<(), MainErr> {
         .build()
         .map_err(|x| x.to_string())?;
     let mut event_pump = sdl_context.event_pump()?;
+    let mouse_util = sdl_context.mouse();
 
     let texture_creator = canvas.texture_creator();
     let mut texture =
@@ -98,6 +100,8 @@ fn main() -> Result<(), MainErr> {
     let mut focus_x = 0;
     let mut focus_y = 0;
 
+    let start = Instant::now();
+
     'main: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -109,6 +113,7 @@ fn main() -> Result<(), MainErr> {
                     Keycode::Space => do_play = !do_play,
                     Keycode::Z => zoom_proportion += 1,
                     Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
+                    Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
                     _ => {}
                 },
                 Event::MouseMotion { x, y, .. } => {
@@ -145,6 +150,28 @@ fn main() -> Result<(), MainErr> {
                 height * zoom_proportion,
             )),
         )?;
+
+        canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
+            x if x < 500 => Color::WHITE,
+            _ => Color::BLACK,
+        });
+        canvas.draw_line(
+            Point::new(0, focus_y - 1),
+            Point::new(width as i32, focus_y - 1),
+        )?;
+        canvas.draw_line(
+            Point::new(0, focus_y + zoom_proportion as i32),
+            Point::new(width as i32, focus_y + zoom_proportion as i32),
+        )?;
+        canvas.draw_line(
+            Point::new(focus_x - 1, 0),
+            Point::new(focus_x - 1, height as i32),
+        )?;
+        canvas.draw_line(
+            Point::new(focus_x + zoom_proportion as i32, 0),
+            Point::new(focus_x + zoom_proportion as i32, height as i32),
+        )?;
+
         canvas.present();
 
         // std::thread::sleep(Duration::from_secs_f32(1.0 / 60.0));
