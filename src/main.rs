@@ -4,11 +4,13 @@ use ffmpeg4::format::context;
 use ffmpeg4::util::{frame, media};
 use ffmpeg4::{format, Packet};
 use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
+use sdl2::rect::Rect;
+use std::cmp::max;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
-use sdl2::keyboard::Keycode;
 
 #[derive(Debug)]
 struct MainErr(String);
@@ -64,6 +66,9 @@ impl<'a> VideoReader<'a> {
 }
 
 fn main() -> Result<(), MainErr> {
+    let width = 1280;
+    let height = 720;
+
     let mut config = Config::default();
     let config = config.merge(config::File::with_name("config.toml"))?;
     let video_path = config.get::<PathBuf>("video")?;
@@ -71,7 +76,7 @@ fn main() -> Result<(), MainErr> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
     let window = video_subsystem
-        .window("Main Window", 1280, 720)
+        .window("Main Window", width, height)
         .build()
         .map_err(|x| x.to_string())?;
     let mut canvas = window
@@ -83,14 +88,37 @@ fn main() -> Result<(), MainErr> {
 
     let texture_creator = canvas.texture_creator();
     let mut texture =
-        texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), 1280, 720)?;
+        texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)?;
 
     let mut input_context = format::input(&video_path)?;
     let mut video_reader = VideoReader::new(&mut input_context)?;
 
     let mut do_play = false;
+    let mut zoom_proportion = 1;
+    let mut focus_x = 0;
+    let mut focus_y = 0;
 
     'main: loop {
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. } => break 'main,
+                Event::KeyDown {
+                    keycode: Some(keycode),
+                    ..
+                } => match keycode {
+                    Keycode::Space => do_play = !do_play,
+                    Keycode::Z => zoom_proportion += 1,
+                    Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
+                    _ => {}
+                },
+                Event::MouseMotion { x, y, .. } => {
+                    focus_x = x;
+                    focus_y = y;
+                }
+                _ => {}
+            }
+        }
+
         if do_play {
             if let Some(frame) = video_reader.next_frame()? {
                 let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
@@ -104,19 +132,20 @@ fn main() -> Result<(), MainErr> {
                     frame.data(2),
                     frame.stride(2),
                 )?;
-                canvas.copy(&texture, None, None)?;
             }
         }
 
+        canvas.copy(
+            &texture,
+            None,
+            Some(Rect::new(
+                focus_x * (1 - zoom_proportion as i32),
+                focus_y * (1 - zoom_proportion as i32),
+                width * zoom_proportion,
+                height * zoom_proportion,
+            )),
+        )?;
         canvas.present();
-
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. } => break 'main,
-                Event::KeyDown { keycode: Some(Keycode::Space), .. } => do_play = !do_play,
-                _ => {}
-            }
-        }
 
         // std::thread::sleep(Duration::from_secs_f32(1.0 / 60.0));
     }
