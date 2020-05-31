@@ -73,6 +73,7 @@ fn main() -> Result<(), MainErr> {
     let mut config = Config::default();
     let config = config.merge(config::File::with_name("config.toml"))?;
     let video_path = config.get::<PathBuf>("video")?;
+    let font_path = config.get::<PathBuf>("font")?;
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -87,10 +88,13 @@ fn main() -> Result<(), MainErr> {
         .map_err(|x| x.to_string())?;
     let mut event_pump = sdl_context.event_pump()?;
     let mouse_util = sdl_context.mouse();
+    let ttf_context = sdl2::ttf::init()?;
 
     let texture_creator = canvas.texture_creator();
     let mut texture =
         texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)?;
+
+    let font = ttf_context.load_font(font_path, 24)?;
 
     let mut input_context = format::input(&video_path)?;
     let mut video_reader = VideoReader::new(&mut input_context)?;
@@ -171,6 +175,14 @@ fn main() -> Result<(), MainErr> {
             Point::new(focus_x + zoom_proportion as i32, 0),
             Point::new(focus_x + zoom_proportion as i32, height as i32),
         )?;
+
+        let text_surface = font
+            .render(&format!("({}, {})", focus_x, focus_y))
+            .solid(Color::GREEN)?;
+        let width = text_surface.width();
+        let height = text_surface.height();
+        let text_texture = texture_creator.create_texture_from_surface(text_surface)?;
+        canvas.copy(&text_texture, None, Some(Rect::new(0, 0, width, height)))?;
 
         canvas.present();
 

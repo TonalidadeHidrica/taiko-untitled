@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sdl2 = {version = "0.34.0", features = ["image"]}
+sdl2 = {version = "0.34.0", features = ["image", "ttf"]}
 config = "0.10.1"
 # stainless_ffmpeg = "0.2.0"
 # stainless-ffmpeg-sys = "4.2.2-update.1"
