@@ -17,8 +17,8 @@ use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 struct MainErr(String);
 
 impl<T> From<T> for MainErr
-where
-    T: ToString,
+    where
+        T: ToString,
 {
     fn from(err: T) -> Self {
         MainErr(err.to_string())
@@ -28,7 +28,7 @@ where
 struct VideoReader<'a> {
     // input_context: &'a context::Input,
     frame: frame::Video,
-    packet_iterator: Box<dyn Iterator<Item = Packet> + 'a>,
+    packet_iterator: Box<dyn Iterator<Item=Packet> + 'a>,
     decoder: decoder::Video,
 }
 
@@ -67,20 +67,21 @@ impl<'a> VideoReader<'a> {
 }
 
 fn main() -> Result<(), MainErr> {
-    let width = 1280u32;
-    let height = 720u32;
-
     let mut config = Config::default();
     let config = config.merge(config::File::with_name("config.toml"))?;
+    let width = config.get::<u32>("width")?;
+    let height = config.get::<u32>("height")?;
+    let hidpi_prop = config.get::<u32>("hidpi_prop").unwrap_or(1);
     let video_path = config.get::<PathBuf>("video")?;
     let font_path = config.get::<PathBuf>("font")?;
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
     let window = video_subsystem
-        .window("Main Window", width, height)
+        .window("Main Window", width / hidpi_prop, height / hidpi_prop)
         .build()
         .map_err(|x| x.to_string())?;
+    println!("{:?}, {:?}", window.size(), window.drawable_size());
     let mut canvas = window
         .into_canvas()
         .present_vsync()
@@ -103,6 +104,8 @@ fn main() -> Result<(), MainErr> {
     let mut zoom_proportion = 1;
     let mut focus_x = 0;
     let mut focus_y = 0;
+    let mut fixed = false;
+    let mut speed_up = false;
 
     let start = Instant::now();
 
@@ -118,17 +121,26 @@ fn main() -> Result<(), MainErr> {
                     Keycode::Z => zoom_proportion += 1,
                     Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
                     Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
+                    Keycode::F => fixed = !fixed,
+                    Keycode::S => speed_up = !speed_up,
                     _ => {}
                 },
                 Event::MouseMotion { x, y, .. } => {
-                    focus_x = x;
-                    focus_y = y;
+                    if !fixed {
+                        focus_x = x * (hidpi_prop as i32);
+                        focus_y = y * (hidpi_prop as i32);
+                    }
                 }
                 _ => {}
             }
         }
 
         if do_play {
+            if speed_up {
+                for _ in 0..5 {
+                    video_reader.next_frame()?;
+                }
+            }
             if let Some(frame) = video_reader.next_frame()? {
                 let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
                 assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
@@ -176,13 +188,40 @@ fn main() -> Result<(), MainErr> {
             Point::new(focus_x + zoom_proportion as i32, height as i32),
         )?;
 
-        let text_surface = font
-            .render(&format!("({}, {})", focus_x, focus_y))
-            .solid(Color::GREEN)?;
-        let width = text_surface.width();
-        let height = text_surface.height();
-        let text_texture = texture_creator.create_texture_from_surface(text_surface)?;
-        canvas.copy(&text_texture, None, Some(Rect::new(0, 0, width, height)))?;
+        let infos = [
+            format!("({}, {})", focus_x, focus_y),
+            // format!("YUV = {:?}",
+            //     current_frame.and_then(|frame|
+            //         (0..3).map(|i|
+            //             current_frame.data(i)[focus_x + focus_y * (width as i32)]
+            //         ).collect_vec()
+            // ),
+        ];
+        let mut current_top = 0;
+        for info in &infos {
+            let text_surface = font
+                .render(info)
+                .solid(Color::GREEN)?;
+            let text_width = text_surface.width();
+            let text_height = text_surface.height();
+            let text_texture = texture_creator.create_texture_from_surface(text_surface)?;
+            canvas.copy(
+                &text_texture,
+                None,
+                Some(Rect::new(0, 0, text_width, text_height)),
+            )?;
+            canvas.copy(
+                &text_texture,
+                None,
+                Some(Rect::new(
+                    (width - text_width) as i32,
+                    current_top,
+                    text_width,
+                    text_height,
+                )),
+            )?;
+            current_top += (text_height as f64 * 1.2) as i32;
+        }
 
         canvas.present();
 
