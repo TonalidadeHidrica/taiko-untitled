@@ -17,8 +17,8 @@ use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 struct MainErr(String);
 
 impl<T> From<T> for MainErr
-    where
-        T: ToString,
+where
+    T: ToString,
 {
     fn from(err: T) -> Self {
         MainErr(err.to_string())
@@ -28,7 +28,7 @@ impl<T> From<T> for MainErr
 struct VideoReader<'a> {
     // input_context: &'a context::Input,
     frame: frame::Video,
-    packet_iterator: Box<dyn Iterator<Item=Packet> + 'a>,
+    packet_iterator: Box<dyn Iterator<Item = Packet> + 'a>,
     decoder: decoder::Video,
 }
 
@@ -199,9 +199,7 @@ fn main() -> Result<(), MainErr> {
         ];
         let mut current_top = 0;
         for info in &infos {
-            let text_surface = font
-                .render(info)
-                .solid(Color::GREEN)?;
+            let text_surface = font.render(info).solid(Color::GREEN)?;
             let text_width = text_surface.width();
             let text_height = text_surface.height();
             let text_texture = texture_creator.create_texture_from_surface(text_surface)?;
