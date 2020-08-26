@@ -12,13 +12,14 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::time::Instant;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
+use sdl2::image::LoadTexture;
 
 #[derive(Debug)]
 struct MainErr(String);
 
 impl<T> From<T> for MainErr
-where
-    T: ToString,
+    where
+        T: ToString,
 {
     fn from(err: T) -> Self {
         MainErr(err.to_string())
@@ -28,7 +29,7 @@ where
 struct VideoReader<'a> {
     // input_context: &'a context::Input,
     frame: frame::Video,
-    packet_iterator: Box<dyn Iterator<Item = Packet> + 'a>,
+    packet_iterator: Box<dyn Iterator<Item=Packet> + 'a>,
     decoder: decoder::Video,
 }
 
@@ -74,6 +75,7 @@ fn main() -> Result<(), MainErr> {
     let hidpi_prop = config.get::<u32>("hidpi_prop").unwrap_or(1);
     let video_path = config.get::<PathBuf>("video")?;
     let font_path = config.get::<PathBuf>("font")?;
+    let image_path = config.get::<PathBuf>("image").ok();
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -92,8 +94,12 @@ fn main() -> Result<(), MainErr> {
     let ttf_context = sdl2::ttf::init()?;
 
     let texture_creator = canvas.texture_creator();
-    let mut texture =
+    let mut video_texture =
         texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)?;
+    let mut image_texture = match image_path {
+        Some(ref image_path) => Some(texture_creator.load_texture(image_path)?),
+        _ => None
+    };
 
     let font = ttf_context.load_font(font_path, 24)?;
 
@@ -106,6 +112,7 @@ fn main() -> Result<(), MainErr> {
     let mut focus_y = 0;
     let mut fixed = false;
     let mut speed_up = false;
+    let mut cursor_mode = true;
 
     let start = Instant::now();
 
@@ -123,6 +130,12 @@ fn main() -> Result<(), MainErr> {
                     Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
                     Keycode::F => fixed = !fixed,
                     Keycode::S => speed_up = !speed_up,
+                    Keycode::C => cursor_mode = !cursor_mode,
+                    Keycode::L => image_texture = match image_path {
+                        Some(ref image_path) =>
+                            Some(texture_creator.load_texture(image_path)?),
+                        _ => None
+                    },
                     _ => {}
                 },
                 Event::MouseMotion { x, y, .. } => {
@@ -144,7 +157,7 @@ fn main() -> Result<(), MainErr> {
             if let Some(frame) = video_reader.next_frame()? {
                 let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
                 assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
-                texture.update_yuv(
+                video_texture.update_yuv(
                     None,
                     frame.data(0),
                     frame.stride(0),
@@ -157,7 +170,7 @@ fn main() -> Result<(), MainErr> {
         }
 
         canvas.copy(
-            &texture,
+            &video_texture,
             None,
             Some(Rect::new(
                 focus_x * (1 - zoom_proportion as i32),
@@ -167,26 +180,42 @@ fn main() -> Result<(), MainErr> {
             )),
         )?;
 
-        canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
-            x if x < 500 => Color::WHITE,
-            _ => Color::BLACK,
-        });
-        canvas.draw_line(
-            Point::new(0, focus_y - 1),
-            Point::new(width as i32, focus_y - 1),
-        )?;
-        canvas.draw_line(
-            Point::new(0, focus_y + zoom_proportion as i32),
-            Point::new(width as i32, focus_y + zoom_proportion as i32),
-        )?;
-        canvas.draw_line(
-            Point::new(focus_x - 1, 0),
-            Point::new(focus_x - 1, height as i32),
-        )?;
-        canvas.draw_line(
-            Point::new(focus_x + zoom_proportion as i32, 0),
-            Point::new(focus_x + zoom_proportion as i32, height as i32),
-        )?;
+        if cursor_mode {
+            canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
+                x if x < 500 => Color::WHITE,
+                _ => Color::BLACK,
+            });
+            canvas.draw_line(
+                Point::new(0, focus_y - 1),
+                Point::new(width as i32, focus_y - 1),
+            )?;
+            canvas.draw_line(
+                Point::new(0, focus_y + zoom_proportion as i32),
+                Point::new(width as i32, focus_y + zoom_proportion as i32),
+            )?;
+            canvas.draw_line(
+                Point::new(focus_x - 1, 0),
+                Point::new(focus_x - 1, height as i32),
+            )?;
+            canvas.draw_line(
+                Point::new(focus_x + zoom_proportion as i32, 0),
+                Point::new(focus_x + zoom_proportion as i32, height as i32),
+            )?;
+        } else {
+            if let Some(ref image_texture) = image_texture {
+                canvas.set_clip_rect(Some(Rect::new(focus_x, focus_y, width, height)));
+                canvas.copy(image_texture,
+                            None,
+                            Some(Rect::new(
+                                focus_x * (1 - zoom_proportion as i32),
+                                focus_y * (1 - zoom_proportion as i32),
+                                width * zoom_proportion,
+                                height * zoom_proportion,
+                            )),
+                )?;
+                canvas.set_clip_rect(None);
+            }
+        }
 
         let infos = [
             format!("({}, {})", focus_x, focus_y),
