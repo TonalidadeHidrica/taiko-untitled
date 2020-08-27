@@ -3,23 +3,25 @@ use ffmpeg4::codec::decoder;
 use ffmpeg4::format::context;
 use ffmpeg4::util::{frame, media};
 use ffmpeg4::{format, Packet};
+use itertools::Itertools;
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
+use sdl2::image::LoadTexture;
+use sdl2::keyboard::{Keycode, Mod};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::{Point, Rect};
+use sdl2::render::Texture;
 use std::cmp::max;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::time::Instant;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
-use sdl2::image::LoadTexture;
 
 #[derive(Debug)]
 struct MainErr(String);
 
 impl<T> From<T> for MainErr
-    where
-        T: ToString,
+where
+    T: ToString,
 {
     fn from(err: T) -> Self {
         MainErr(err.to_string())
@@ -29,7 +31,7 @@ impl<T> From<T> for MainErr
 struct VideoReader<'a> {
     // input_context: &'a context::Input,
     frame: frame::Video,
-    packet_iterator: Box<dyn Iterator<Item=Packet> + 'a>,
+    packet_iterator: Box<dyn Iterator<Item = Packet> + 'a>,
     decoder: decoder::Video,
 }
 
@@ -76,6 +78,18 @@ fn main() -> Result<(), MainErr> {
     let video_path = config.get::<PathBuf>("video")?;
     let font_path = config.get::<PathBuf>("font")?;
     let image_path = config.get::<PathBuf>("image").ok();
+    let notes_path = config.get_str("notes_image").ok();
+    let note_dimension =
+        config
+            .get_str("note_dimension")
+            .ok()
+            .and_then(|s| match s.split(" ").collect_vec()[..] {
+                [a, b, c, d] => match (a.parse(), b.parse(), c.parse(), d.parse()) {
+                    (Ok(a), Ok(b), Ok(c), Ok(d)) => Some(Rect::new(a, b, c, d)),
+                    _ => None,
+                },
+                _ => None,
+            });
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -98,7 +112,11 @@ fn main() -> Result<(), MainErr> {
         texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)?;
     let mut image_texture = match image_path {
         Some(ref image_path) => Some(texture_creator.load_texture(image_path)?),
-        _ => None
+        _ => None,
+    };
+    let mut notes_texture = match notes_path {
+        Some(ref path) => Some(texture_creator.load_texture(path)?),
+        _ => None,
     };
 
     let font = ttf_context.load_font(font_path, 24)?;
@@ -113,6 +131,7 @@ fn main() -> Result<(), MainErr> {
     let mut fixed = false;
     let mut speed_up = false;
     let mut cursor_mode = true;
+    let mut note_x = 500;
 
     let start = Instant::now();
 
@@ -122,6 +141,7 @@ fn main() -> Result<(), MainErr> {
                 Event::Quit { .. } => break 'main,
                 Event::KeyDown {
                     keycode: Some(keycode),
+                    keymod,
                     ..
                 } => match keycode {
                     Keycode::Space => do_play = !do_play,
@@ -131,11 +151,28 @@ fn main() -> Result<(), MainErr> {
                     Keycode::F => fixed = !fixed,
                     Keycode::S => speed_up = !speed_up,
                     Keycode::C => cursor_mode = !cursor_mode,
-                    Keycode::L => image_texture = match image_path {
-                        Some(ref image_path) =>
-                            Some(texture_creator.load_texture(image_path)?),
-                        _ => None
-                    },
+                    Keycode::L => {
+                        image_texture = match image_path {
+                            Some(ref image_path) => Some(texture_creator.load_texture(image_path)?),
+                            _ => None,
+                        };
+                        notes_texture = match notes_path {
+                            Some(ref path) => Some(texture_creator.load_texture(path)?),
+                            _ => None,
+                        };
+                    }
+                    Keycode::Left | Keycode::Right => {
+                        note_x += match () {
+                            _ if keycode == Keycode::Right => 1,
+                            _ => -1,
+                        } * match () {
+                            _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 10,
+                            _ => 1,
+                        }
+                    }
+                    Keycode::Period => {
+                        update_next_frame_to_texture(&mut video_texture, &mut video_reader)?;
+                    }
                     _ => {}
                 },
                 Event::MouseMotion { x, y, .. } => {
@@ -154,27 +191,18 @@ fn main() -> Result<(), MainErr> {
                     video_reader.next_frame()?;
                 }
             }
-            if let Some(frame) = video_reader.next_frame()? {
-                let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
-                assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
-                video_texture.update_yuv(
-                    None,
-                    frame.data(0),
-                    frame.stride(0),
-                    frame.data(1),
-                    frame.stride(1),
-                    frame.data(2),
-                    frame.stride(2),
-                )?;
-            }
+            update_next_frame_to_texture(&mut video_texture, &mut video_reader)?;
         }
+
+        let origin_x = focus_x * (1 - zoom_proportion as i32);
+        let origin_y = focus_y * (1 - zoom_proportion as i32);
 
         canvas.copy(
             &video_texture,
             None,
             Some(Rect::new(
-                focus_x * (1 - zoom_proportion as i32),
-                focus_y * (1 - zoom_proportion as i32),
+                origin_x,
+                origin_y,
                 width * zoom_proportion,
                 height * zoom_proportion,
             )),
@@ -202,19 +230,32 @@ fn main() -> Result<(), MainErr> {
                 Point::new(focus_x + zoom_proportion as i32, height as i32),
             )?;
         } else {
+            canvas.set_clip_rect(Some(Rect::new(focus_x, focus_y, width, height)));
             if let Some(ref image_texture) = image_texture {
-                canvas.set_clip_rect(Some(Rect::new(focus_x, focus_y, width, height)));
-                canvas.copy(image_texture,
-                            None,
-                            Some(Rect::new(
-                                focus_x * (1 - zoom_proportion as i32),
-                                focus_y * (1 - zoom_proportion as i32),
-                                width * zoom_proportion,
-                                height * zoom_proportion,
-                            )),
+                canvas.copy(
+                    image_texture,
+                    None,
+                    Some(Rect::new(
+                        origin_x,
+                        origin_y,
+                        width * zoom_proportion,
+                        height * zoom_proportion,
+                    )),
                 )?;
-                canvas.set_clip_rect(None);
             }
+            if let Some(ref notes_texture) = notes_texture {
+                canvas.copy(
+                    notes_texture,
+                    note_dimension,
+                    Rect::new(
+                        origin_x + note_x * zoom_proportion as i32,
+                        origin_y + 288 * zoom_proportion as i32,
+                        195 * zoom_proportion,
+                        195 * zoom_proportion,
+                    ),
+                )?;
+            }
+            canvas.set_clip_rect(None);
         }
 
         let infos = [
@@ -255,5 +296,25 @@ fn main() -> Result<(), MainErr> {
         // std::thread::sleep(Duration::from_secs_f32(1.0 / 60.0));
     }
 
+    Ok(())
+}
+
+fn update_next_frame_to_texture(
+    video_texture: &mut Texture,
+    video_reader: &mut VideoReader,
+) -> Result<(), MainErr> {
+    if let Some(frame) = video_reader.next_frame()? {
+        let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
+        assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
+        video_texture.update_yuv(
+            None,
+            frame.data(0),
+            frame.stride(0),
+            frame.data(1),
+            frame.stride(1),
+            frame.data(2),
+            frame.stride(2),
+        )?;
+    }
     Ok(())
 }
