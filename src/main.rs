@@ -83,7 +83,7 @@ fn main() -> Result<(), MainErr> {
         config
             .get_str("note_dimension")
             .ok()
-            .and_then(|s| match s.split(" ").collect_vec()[..] {
+            .and_then(|s| match s.split(' ').collect_vec()[..] {
                 [a, b, c, d] => match (a.parse(), b.parse(), c.parse(), d.parse()) {
                     (Ok(a), Ok(b), Ok(c), Ok(d)) => Some(Rect::new(a, b, c, d)),
                     _ => None,
