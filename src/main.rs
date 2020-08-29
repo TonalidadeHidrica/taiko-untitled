@@ -4,9 +4,10 @@ use sdl2::video::WindowBuildError;
 use std::time::Duration;
 
 use config::{Config, ConfigError};
+use sdl2::image::LoadTexture;
 use sdl2::keyboard::Keycode;
-use sdl2::mixer;
 use sdl2::mixer::{Channel, Chunk, AUDIO_S16LSB, DEFAULT_CHANNELS};
+use sdl2::{mixer, IntegerOrSdlError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -19,6 +20,7 @@ struct TaikoError {
 enum TaikoErrorCause {
     SdlError(String),
     SdlWindowError(WindowBuildError),
+    SdlCanvasError(IntegerOrSdlError),
     ConfigError(ConfigError),
 }
 
@@ -43,6 +45,16 @@ impl TaikoError {
         }
     }
 
+    fn new_sdl_canvas_error<S>(message: S, canvas_error: IntegerOrSdlError) -> TaikoError
+    where
+        S: ToString,
+    {
+        TaikoError {
+            message: message.to_string(),
+            cause: TaikoErrorCause::SdlCanvasError(canvas_error),
+        }
+    }
+
     fn new_config_error<S>(message: S, config_error: ConfigError) -> TaikoError
     where
         S: ToString,
@@ -58,6 +70,7 @@ impl TaikoError {
 struct TaikoConfig {
     window: WindowSizeConfig,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 struct WindowSizeConfig {
     width: u32,
@@ -100,6 +113,15 @@ fn main() -> Result<(), TaikoError> {
         .event_pump()
         .map_err(|s| TaikoError::new_sdl_error("Failed to initialize event pump for SDL", s))?;
 
+    let mut canvas = window
+        .into_canvas()
+        .build()
+        .map_err(|e| TaikoError::new_sdl_canvas_error("Failed to create SDL canvas", e))?;
+    let texture_creator = canvas.texture_creator();
+    let background_texture = texture_creator
+        .load_texture("assets/img/game_bg.png")
+        .map_err(|s| TaikoError::new_sdl_error("Failed to load background texture", s))?;
+
     // let _audio = sdl_context
     //     .audio()
     //     .map_err(|s| TaikoError::new_sdl_error("Failed to initialize audio subsystem of SDL", s))?;
@@ -134,7 +156,11 @@ fn main() -> Result<(), TaikoError> {
                 _ => {}
             }
         }
-        std::thread::sleep(Duration::from_secs_f64(1.0 / 100.0));
+        canvas
+            .copy(&background_texture, None, None)
+            .map_err(|s| TaikoError::new_sdl_error("Failed to draw background", s))?;
+        canvas.present();
+        std::thread::sleep(Duration::from_secs_f64(1.0 / 60.0));
     }
 
     Ok(())
