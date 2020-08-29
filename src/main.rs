@@ -3,14 +3,13 @@ use sdl2::event::Event;
 
 use std::time::Duration;
 
-use sdl2::image::LoadTexture;
 use sdl2::keyboard::Keycode;
 use sdl2::mixer;
-use sdl2::mixer::{Channel, Chunk, AUDIO_S16LSB, DEFAULT_CHANNELS};
+use sdl2::mixer::{Channel, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::rect::Rect;
-use sdl2::render::TextureQuery;
 
-use taiko_untitled::errors::{TaikoError, TaikoErrorCause};
+use taiko_untitled::assets::Assets;
+use taiko_untitled::errors::TaikoError;
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -48,22 +47,6 @@ fn main() -> Result<(), TaikoError> {
         }
     }
     let texture_creator = canvas.texture_creator();
-    let background_texture = texture_creator
-        .load_texture("assets/img/game_bg.png")
-        .map_err(|s| TaikoError::new_sdl_error("Failed to load background texture", s))?;
-    match background_texture.query() {
-        TextureQuery {
-            width: 1920,
-            height: 1080,
-            ..
-        } => {}
-        _ => {
-            return Err(TaikoError {
-                message: "Texture size of the background is invalid".to_string(),
-                cause: TaikoErrorCause::InvalidResourceError,
-            });
-        }
-    }
 
     // let _audio = sdl_context
     //     .audio()
@@ -72,10 +55,7 @@ fn main() -> Result<(), TaikoError> {
         .map_err(|s| TaikoError::new_sdl_error("Failed to open audio stream", s))?;
     mixer::allocate_channels(128);
 
-    let sound_don = Chunk::from_file("assets/snd/dong.ogg")
-        .map_err(|s| TaikoError::new_sdl_error("Failed to load 'don' sound", s))?;
-    let sound_ka = Chunk::from_file("assets/snd/ka.ogg")
-        .map_err(|s| TaikoError::new_sdl_error("Failed to load 'ka' sound", s))?;
+    let assets = Assets::new(&texture_creator)?;
 
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -87,8 +67,8 @@ fn main() -> Result<(), TaikoError> {
                     ..
                 } => {
                     if let Some(sound) = match keycode {
-                        Keycode::X | Keycode::Slash => Some(&sound_don),
-                        Keycode::Z | Keycode::Underscore => Some(&sound_ka),
+                        Keycode::X | Keycode::Slash => Some(&assets.chunks.sound_don),
+                        Keycode::Z | Keycode::Underscore => Some(&assets.chunks.sound_ka),
                         _ => None,
                     } {
                         Channel::all().play(&sound, 0).map_err(|s| {
@@ -100,7 +80,11 @@ fn main() -> Result<(), TaikoError> {
             }
         }
         canvas
-            .copy(&background_texture, None, Some(Rect::new(0, 0, 1920, 1080)))
+            .copy(
+                &assets.textures.background,
+                None,
+                Some(Rect::new(0, 0, 1920, 1080)),
+            )
             .map_err(|s| TaikoError::new_sdl_error("Failed to draw background", s))?;
         canvas.present();
         std::thread::sleep(Duration::from_secs_f64(1.0 / 60.0));
