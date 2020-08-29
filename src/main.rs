@@ -7,6 +7,8 @@ use config::{Config, ConfigError};
 use sdl2::image::LoadTexture;
 use sdl2::keyboard::Keycode;
 use sdl2::mixer::{Channel, Chunk, AUDIO_S16LSB, DEFAULT_CHANNELS};
+use sdl2::rect::Rect;
+use sdl2::render::TextureQuery;
 use sdl2::{mixer, IntegerOrSdlError};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +24,7 @@ enum TaikoErrorCause {
     SdlWindowError(WindowBuildError),
     SdlCanvasError(IntegerOrSdlError),
     ConfigError(ConfigError),
+    InvalidResourceError,
 }
 
 impl TaikoError {
@@ -117,10 +120,36 @@ fn main() -> Result<(), TaikoError> {
         .into_canvas()
         .build()
         .map_err(|e| TaikoError::new_sdl_canvas_error("Failed to create SDL canvas", e))?;
+    match canvas.output_size() {
+        Ok((width, height)) => {
+            let scale = f32::min(width as f32 / 1920.0, height as f32 / 1080.0);
+            if let Err(s) = canvas.set_scale(scale, scale) {
+                eprintln!("Failed to scale the dimensions.  The drawing scale may not be valid.");
+                eprintln!("Caused by: {}", s);
+            }
+        }
+        Err(s) => {
+            eprintln!("Failed to get the canvas dimension.  The drawing scale may not be valid.");
+            eprintln!("Caused by: {}", s);
+        }
+    }
     let texture_creator = canvas.texture_creator();
     let background_texture = texture_creator
         .load_texture("assets/img/game_bg.png")
         .map_err(|s| TaikoError::new_sdl_error("Failed to load background texture", s))?;
+    match background_texture.query() {
+        TextureQuery {
+            width: 1920,
+            height: 1080,
+            ..
+        } => {}
+        _ => {
+            return Err(TaikoError {
+                message: "Texture size of the background is invalid".to_string(),
+                cause: TaikoErrorCause::InvalidResourceError,
+            });
+        }
+    }
 
     // let _audio = sdl_context
     //     .audio()
@@ -157,7 +186,7 @@ fn main() -> Result<(), TaikoError> {
             }
         }
         canvas
-            .copy(&background_texture, None, None)
+            .copy(&background_texture, None, Some(Rect::new(0, 0, 1920, 1080)))
             .map_err(|s| TaikoError::new_sdl_error("Failed to draw background", s))?;
         canvas.present();
         std::thread::sleep(Duration::from_secs_f64(1.0 / 60.0));
