@@ -4,6 +4,9 @@ use sdl2::video::WindowBuildError;
 use std::time::Duration;
 
 use config::{Config, ConfigError};
+use sdl2::keyboard::Keycode;
+use sdl2::mixer;
+use sdl2::mixer::{Channel, Chunk, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -84,7 +87,7 @@ fn main() -> Result<(), TaikoError> {
         .map_err(|e| TaikoError::new_config_error("Failed to parse configurations", e))?;
 
     let sdl_context = sdl2::init()
-        .map_err(|s| TaikoError::new_sdl_error("Failed to initialize SDL2 context", s))?;
+        .map_err(|s| TaikoError::new_sdl_error("Failed to initialize SDL context", s))?;
     let video_subsystem = sdl_context
         .video()
         .map_err(|s| TaikoError::new_sdl_error("Failed to initialize video subsystem of SDL", s))?;
@@ -95,16 +98,43 @@ fn main() -> Result<(), TaikoError> {
         .map_err(|x| TaikoError::new_sdl_window_error("Failed to create main window", x))?;
     let mut event_pump = sdl_context
         .event_pump()
-        .map_err(|s| TaikoError::new_sdl_error("Failed to initialize event pump for SDL2", s))?;
+        .map_err(|s| TaikoError::new_sdl_error("Failed to initialize event pump for SDL", s))?;
+
+    // let _audio = sdl_context
+    //     .audio()
+    //     .map_err(|s| TaikoError::new_sdl_error("Failed to initialize audio subsystem of SDL", s))?;
+    mixer::open_audio(44100, AUDIO_S16LSB, DEFAULT_CHANNELS, 256)
+        .map_err(|s| TaikoError::new_sdl_error("Failed to open audio stream", s))?;
+    mixer::allocate_channels(128);
+
+    let sound_don = Chunk::from_file("assets/snd/dong.ogg")
+        .map_err(|s| TaikoError::new_sdl_error("Failed to load 'don' sound", s))?;
+    let sound_ka = Chunk::from_file("assets/snd/ka.ogg")
+        .map_err(|s| TaikoError::new_sdl_error("Failed to load 'ka' sound", s))?;
 
     'main: loop {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'main,
+                Event::KeyDown {
+                    repeat: false,
+                    keycode: Some(keycode),
+                    ..
+                } => {
+                    if let Some(sound) = match keycode {
+                        Keycode::X | Keycode::Slash => Some(&sound_don),
+                        Keycode::Z | Keycode::Underscore => Some(&sound_ka),
+                        _ => None,
+                    } {
+                        Channel::all().play(&sound, 0).map_err(|s| {
+                            TaikoError::new_sdl_error("Failed to play sound effect", s)
+                        })?;
+                    };
+                }
                 _ => {}
             }
         }
-        std::thread::sleep(Duration::from_secs_f64(1.0 / 60.0));
+        std::thread::sleep(Duration::from_secs_f64(1.0 / 100.0));
     }
 
     Ok(())

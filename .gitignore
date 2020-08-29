@@ -18,3 +18,5 @@
 
 # Environmental configuration file
 /config.toml
+# Assets
+/assets/
