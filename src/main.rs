@@ -1,106 +1,20 @@
 use sdl2;
 use sdl2::event::Event;
-use sdl2::video::WindowBuildError;
+
 use std::time::Duration;
 
-use config::{Config, ConfigError};
 use sdl2::image::LoadTexture;
 use sdl2::keyboard::Keycode;
+use sdl2::mixer;
 use sdl2::mixer::{Channel, Chunk, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::rect::Rect;
 use sdl2::render::TextureQuery;
-use sdl2::{mixer, IntegerOrSdlError};
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
-struct TaikoError {
-    message: String,
-    cause: TaikoErrorCause,
-}
-
-#[derive(Debug)]
-enum TaikoErrorCause {
-    SdlError(String),
-    SdlWindowError(WindowBuildError),
-    SdlCanvasError(IntegerOrSdlError),
-    ConfigError(ConfigError),
-    InvalidResourceError,
-}
-
-impl TaikoError {
-    fn new_sdl_error<S>(message: S, sdl_message: String) -> TaikoError
-    where
-        S: ToString,
-    {
-        TaikoError {
-            message: message.to_string(),
-            cause: TaikoErrorCause::SdlError(sdl_message),
-        }
-    }
-
-    fn new_sdl_window_error<S>(message: S, window_build_error: WindowBuildError) -> TaikoError
-    where
-        S: ToString,
-    {
-        TaikoError {
-            message: message.to_string(),
-            cause: TaikoErrorCause::SdlWindowError(window_build_error),
-        }
-    }
-
-    fn new_sdl_canvas_error<S>(message: S, canvas_error: IntegerOrSdlError) -> TaikoError
-    where
-        S: ToString,
-    {
-        TaikoError {
-            message: message.to_string(),
-            cause: TaikoErrorCause::SdlCanvasError(canvas_error),
-        }
-    }
-
-    fn new_config_error<S>(message: S, config_error: ConfigError) -> TaikoError
-    where
-        S: ToString,
-    {
-        TaikoError {
-            message: message.to_string(),
-            cause: TaikoErrorCause::ConfigError(config_error),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct TaikoConfig {
-    window: WindowSizeConfig,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct WindowSizeConfig {
-    width: u32,
-    height: u32,
-}
+use taiko_untitled::errors::{TaikoError, TaikoErrorCause};
 
 fn main() -> Result<(), TaikoError> {
-    let mut config = Config::new();
-    config
-        .merge(
-            Config::try_from(&TaikoConfig {
-                window: WindowSizeConfig {
-                    width: 1920,
-                    height: 1080,
-                },
-            })
-            .map_err(|e| {
-                TaikoError::new_config_error("Failed to load default configurations", e)
-            })?,
-        )
-        .map_err(|e| TaikoError::new_config_error("Failed to merge default configurations", e))?;
-    config
-        .merge(config::File::with_name("config.toml").required(false))
-        .map_err(|e| TaikoError::new_config_error("Failed to load local configurations", e))?;
-    let config = config
-        .try_into::<TaikoConfig>()
-        .map_err(|e| TaikoError::new_config_error("Failed to parse configurations", e))?;
+    let config = taiko_untitled::config::get_config()
+        .map_err(|e| TaikoError::new_config_error("Failed to load configuration", e))?;
 
     let sdl_context = sdl2::init()
         .map_err(|s| TaikoError::new_sdl_error("Failed to initialize SDL context", s))?;
