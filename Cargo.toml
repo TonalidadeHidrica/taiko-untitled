@@ -8,3 +8,5 @@ edition = "2018"
 
 [dependencies]
 sdl2 = { version = "0.34.2", features = ["image", "mixer"] }
+serde = { version = "1.0.115", features = ["derive"] }
+config = "0.10.1"
