@@ -1,5 +1,3 @@
-use sdl2;
-
 use sdl2::video::WindowBuildError;
 
 use config::ConfigError;

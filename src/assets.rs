@@ -76,5 +76,5 @@ fn load_texture_and_check_size<P: AsRef<Path>>(
             });
         }
     }
-    return Ok(texture);
+    Ok(texture)
 }
