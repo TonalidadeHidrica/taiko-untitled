@@ -1,7 +1,7 @@
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use itertools::Itertools;
-use std::cmp::min;
+use std::cmp::{min, max};
 use std::fs::File;
 use std::io;
 use std::io::{Error, Read};
@@ -45,6 +45,7 @@ pub struct Song {
 #[derive(Default, Debug)]
 pub struct Score {
     pub notes: Vec<Note>,
+    pub bar_lines: Vec<BarLine>,
 }
 
 #[derive(Debug)]
@@ -89,6 +90,13 @@ pub enum RendaKind {
 pub enum QuotaRendaKind {
     Balloon,
     Potato,
+}
+
+#[derive(Debug)]
+pub struct BarLine {
+    time: f64,
+    scroll_speed: f64,
+    visible: bool,
 }
 
 impl Default for Song {
@@ -200,7 +208,12 @@ impl SongContext {
             .elements
             .iter()
             .filter(|x| matches!(x, TjaElement::NoteChar(..)))
-            .count() as f64;
+            .count();
+        if notes_count == 0 {
+            self.elements.push(TjaElement::NoteChar('0'));
+        }
+        let notes_count = max(1, notes_count) as f64;
+        let mut first_note = true;
         for element in self.elements.iter() {
             match element {
                 TjaElement::NoteChar(c) => {
@@ -213,6 +226,14 @@ impl SongContext {
                         _ => None,
                     } {
                         self.score.notes.push(note);
+                    }
+                    if first_note {
+                        first_note = false;
+                        self.score.bar_lines.push(BarLine {
+                            scroll_speed: self.scroll_speed(),
+                            time: self.time,
+                            visible: self.bar_line,
+                        });
                     }
                     self.time +=
                         self.measure.get_beat_count() * self.bpm.get_beat_duration() / notes_count;
@@ -311,6 +332,7 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                 }
             } else if let Some(delay) = take_remaining("#DELAY", line) {
                 if let Some(delay) = delay.parse_first() {
+                    eprintln!("Delay is deprecated, so it may not work properly.");
                     context.elements.push(TjaElement::Delay(delay));
                 }
             } else if let Some(_) = take_remaining("#BRANCHSTART", line) {
@@ -429,22 +451,6 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                     eprintln!("Unknown key: {}", key);
                 }
             }
-        }
-    }
-    for note in &song.score.as_ref().unwrap().notes[..] {
-        if let NoteContent::Normal {
-            ref color,
-            ref size,
-            ref time,
-        } = note.content
-        {
-            println!(
-                "{}\t{}\t{}\t{}",
-                time,
-                note.scroll_speed,
-                matches!(color, NoteColor::Don),
-                matches!(size, NoteSize::Large)
-            );
         }
     }
     Ok(song)
