@@ -84,12 +84,15 @@ fn main() -> Result<(), TaikoError> {
         _ => None,
     };
 
-    let mut playback_start = None;
-
     unsafe {
         // variable `assets` is valid while this main function exists on the stack trace.
         sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
     }
+
+    let mut playback_start = None;
+    let mut auto = false;
+    let mut auto_last_played = Instant::now();
+    let mut renda_last_played = Instant::now();
 
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -110,11 +113,68 @@ fn main() -> Result<(), TaikoError> {
                             }
                         }
                     }
+                    Keycode::F1 => {
+                        auto = !auto;
+                        dbg!(auto);
+                        auto_last_played = Instant::now();
+                    }
                     _ => {}
                 },
                 _ => {}
             }
         }
+
+        if let (
+            Some(Song {
+                score: Some(score), ..
+            }),
+            Some(playback_start),
+        ) = (&song, &playback_start)
+        {
+            let now = Instant::now();
+            for note in score.notes.iter() {
+                match &note.content {
+                    tja::NoteContent::Normal { time, color, size } => {
+                        let time = *playback_start + Duration::from_secs_f64(*time);
+                        if !(auto_last_played < time && time <= now) {
+                            continue;
+                        }
+                        let chunk = match color {
+                            tja::NoteColor::Don => &assets.chunks.sound_don,
+                            tja::NoteColor::Ka => &assets.chunks.sound_ka,
+                        };
+                        let count = match size {
+                            tja::NoteSize::Small => 1,
+                            tja::NoteSize::Large => 2,
+                        };
+                        for _ in 0..count {
+                            Channel::all()
+                                .play(chunk, 0)
+                                .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
+                        }
+                    }
+                    tja::NoteContent::Renda {
+                        start_time,
+                        end_time,
+                        ..
+                    } => {
+                        let start_time = *playback_start + Duration::from_secs_f64(*start_time);
+                        let end_time = *playback_start + Duration::from_secs_f64(*end_time);
+                        if end_time <= auto_last_played || now < start_time {
+                            continue;
+                        }
+                        if now - renda_last_played > Duration::from_secs_f64(1.0 / 20.0) {
+                            Channel::all()
+                                .play(&assets.chunks.sound_don, 0)
+                                .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
+                            renda_last_played = now;
+                        }
+                    }
+                }
+            }
+            auto_last_played = Instant::now();
+        }
+
         canvas
             .copy(
                 &assets.textures.background,
