@@ -1,15 +1,13 @@
+use itertools::Itertools;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::mixer;
 use sdl2::mixer::{Channel, Music, AUDIO_S16LSB, DEFAULT_CHANNELS};
-use sdl2::rect::Rect;
-use std::time::{Duration, Instant};
-
-use itertools::Itertools;
 use sdl2::pixels::Color;
-use sdl2_sys;
+use sdl2::rect::Rect;
 use std::convert::TryFrom;
 use std::ffi::c_void;
+use std::time::{Duration, Instant};
 use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
@@ -89,8 +87,8 @@ fn main() -> Result<(), TaikoError> {
     let mut playback_start = None;
 
     unsafe {
-        // let ptr: *mut Assets = &mut assets;
-        sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut Assets as *mut c_void);
+        // variable `assets` is valid while this main function exists on the stack trace.
+        sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
     }
 
     'main: loop {
@@ -102,15 +100,6 @@ fn main() -> Result<(), TaikoError> {
                     keycode: Some(keycode),
                     ..
                 } => {
-                    // if let Some(sound) = match keycode {
-                    //     Keycode::X | Keycode::Slash => Some(&assets.chunks.sound_don),
-                    //     Keycode::Z | Keycode::Underscore => Some(&assets.chunks.sound_ka),
-                    //     _ => None,
-                    // } {
-                    //     Channel::all()
-                    //         .play(&sound, 0)
-                    //         .map_err(|s| new_sdl_error("Failed to play sound effect", s))?;
-                    // } else {
                     match keycode {
                         Keycode::Space => {
                             if let Some(ref music) = music {
@@ -198,6 +187,10 @@ fn main() -> Result<(), TaikoError> {
         }
     }
 
+    unsafe {
+        sdl2_sys::SDL_DelEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
+    }
+
     Ok(())
 }
 
@@ -210,27 +203,22 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
     let raw = unsafe { *event };
     let raw_type = unsafe { raw.type_ };
 
+    // The following conversion is copied from `sdl2::event::Event:from_ll`.
+    // Why can't I reuse it?  Because it's currently a private function.
+
     // if event type has not been defined, treat it as a UserEvent
     let event_type: EventType = EventType::try_from(raw_type as u32).unwrap_or(EventType::User);
     if let Some(keycode) = unsafe {
         match event_type {
             EventType::KeyDown => {
                 let event = raw.key;
-
-                // let event = Event::KeyDown {
-                //     timestamp: event.timestamp,
-                //     window_id: event.windowID,
-                //     keycode: Keycode::from_i32(event.keysym.sym as i32),
-                //     scancode: Scancode::from_i32(event.keysym.scancode as i32),
-                //     keymod: keyboard::Mod::from_bits_truncate(event.keysym.mod_),
-                //     repeat: event.repeat != 0,
-                // };
-                // Some(event)
                 Keycode::from_i32(event.keysym.sym as i32).filter(|_| event.repeat == 0)
             }
             _ => None,
         }
     } {
+        // `user_data` originates from `assets` variable in the `main` function stack frame,
+        // which should be valid until the hook is removed.
         let chunks = unsafe { &(*(user_data as *mut Assets)).chunks };
         if let Some(sound) = match keycode {
             Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
@@ -240,5 +228,5 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
             Channel::all().play(&sound, 0).ok();
         }
     }
-    return 0;
+    0
 }

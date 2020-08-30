@@ -1,8 +1,6 @@
-use sdl2::video::WindowBuildError;
-
-use config::ConfigError;
-
 use crate::tja::TjaError;
+use config::ConfigError;
+use sdl2::video::WindowBuildError;
 use sdl2::IntegerOrSdlError;
 
 #[derive(Debug)]
