@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TaikoConfig {
     pub window: WindowConfig,
+    pub volume: VolumeConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -14,6 +15,12 @@ pub struct WindowConfig {
     pub fps: f64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VolumeConfig {
+    pub song: f64,
+    pub se: f64,
+}
+
 impl Default for TaikoConfig {
     fn default() -> Self {
         TaikoConfig {
@@ -22,6 +29,10 @@ impl Default for TaikoConfig {
                 height: 1080,
                 vsync: false,
                 fps: 60.0,
+            },
+            volume: VolumeConfig {
+                song: 100.0,
+                se: 100.0,
             },
         }
     }

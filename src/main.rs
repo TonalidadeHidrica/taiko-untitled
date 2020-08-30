@@ -64,6 +64,13 @@ fn main() -> Result<(), TaikoError> {
     mixer::allocate_channels(128);
 
     let mut assets = Assets::new(&texture_creator)?;
+    {
+        let volume = (128.0 * config.volume.se / 100.0) as i32;
+        assets.chunks.sound_don.set_volume(volume);
+        assets.chunks.sound_ka.set_volume(volume);
+        let volume = (128.0 * config.volume.song / 100.0) as i32;
+        Music::set_volume(volume);
+    }
 
     let song = if let [_, tja_file_name, ..] = &std::env::args().collect_vec()[..] {
         Some(
