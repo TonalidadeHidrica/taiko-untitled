@@ -1,7 +1,7 @@
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use itertools::Itertools;
-use std::cmp::{min, max};
+use std::cmp::{max, min};
 use std::fs::File;
 use std::io;
 use std::io::{Error, Read};
@@ -50,7 +50,7 @@ pub struct Score {
 
 #[derive(Debug)]
 pub struct Note {
-    pub scroll_speed: f64,
+    pub scroll_speed: Bpm,
     pub content: NoteContent,
 }
 
@@ -95,7 +95,7 @@ pub enum QuotaRendaKind {
 #[derive(Debug)]
 pub struct BarLine {
     time: f64,
-    scroll_speed: f64,
+    scroll_speed: Bpm,
     visible: bool,
 }
 
@@ -129,7 +129,8 @@ pub enum SubtitleStyle {
 }
 
 pub fn load_tja_from_file<P: AsRef<Path>>(path: P) -> Result<Song, TjaError> {
-    let mut file = File::open(&path)?;
+    let path = path.as_ref();
+    let mut file = File::open(path)?;
     let mut buf = Vec::new();
     let _ = file.read_to_end(&mut buf)?;
 
@@ -150,7 +151,11 @@ pub fn load_tja_from_file<P: AsRef<Path>>(path: P) -> Result<Song, TjaError> {
             DecodingError::MalformedByteSequenceFound(encoding),
         ))
     } else {
-        load_tja_from_str(source.to_string())
+        let mut song = load_tja_from_str(source.to_string())?;
+        if let Some(wave) = song.wave {
+            song.wave = Some(path.with_file_name(wave));
+        }
+        Ok(song)
     }
 }
 
@@ -175,15 +180,15 @@ impl Default for Measure {
     }
 }
 impl Measure {
-    fn get_beat_count(&self) -> f64 {
+    pub fn get_beat_count(&self) -> f64 {
         self.0 / self.1 * 4.0
     }
 }
 
 #[derive(Debug)]
-struct Bpm(f64);
+pub struct Bpm(f64);
 impl Bpm {
-    fn get_beat_duration(&self) -> f64 {
+    pub fn get_beat_duration(&self) -> f64 {
         60.0 / self.0
     }
 }
@@ -248,8 +253,8 @@ impl SongContext {
         }
         self.elements.clear();
     }
-    fn scroll_speed(&self) -> f64 {
-        self.bpm.0 * self.hs
+    fn scroll_speed(&self) -> Bpm {
+        Bpm(self.bpm.0 * self.hs)
     }
     fn note(&self, ka: bool, large: bool) -> Note {
         Note {

@@ -1,4 +1,4 @@
-use crate::errors::{TaikoError, TaikoErrorCause};
+use crate::errors::{new_sdl_error, TaikoError, TaikoErrorCause};
 use sdl2::image::LoadTexture;
 use sdl2::mixer::Chunk;
 use sdl2::render::{Texture, TextureCreator, TextureQuery};
@@ -50,9 +50,9 @@ impl<'a> Assets<'a> {
             textures,
             chunks: Chunks {
                 sound_don: Chunk::from_file(snd_dir.join("dong.ogg"))
-                    .map_err(|s| TaikoError::new_sdl_error("Failed to load 'don' sound", s))?,
+                    .map_err(|s| new_sdl_error("Failed to load 'don' sound", s))?,
                 sound_ka: Chunk::from_file(snd_dir.join("ka.ogg"))
-                    .map_err(|s| TaikoError::new_sdl_error("Failed to load 'ka' sound", s))?,
+                    .map_err(|s| new_sdl_error("Failed to load 'ka' sound", s))?,
             },
         };
         Ok(ret)
@@ -66,7 +66,7 @@ fn load_texture_and_check_size<P: AsRef<Path>>(
 ) -> Result<Texture, TaikoError> {
     let texture = texture_creator
         .load_texture(path)
-        .map_err(|s| TaikoError::new_sdl_error("Failed to load background texture", s))?;
+        .map_err(|s| new_sdl_error("Failed to load background texture", s))?;
     match texture.query() {
         TextureQuery { width, height, .. } if (width, height) == required_dimensions => {}
         _ => {
