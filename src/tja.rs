@@ -541,6 +541,22 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
             }
         }
     }
+    // for note in &song.score.as_ref().unwrap().notes[..] {
+    //     if let NoteContent::Normal {
+    //         ref color,
+    //         ref size,
+    //         ref time,
+    //     } = note.content
+    //     {
+    //         println!(
+    //             "{}\t{}\t{}\t{}",
+    //             time,
+    //             note.scroll_speed.0,
+    //             matches!(color, NoteColor::Don),
+    //             matches!(size, NoteSize::Large)
+    //         );
+    //     }
+    // }
     Ok(song)
 }
 
