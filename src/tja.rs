@@ -315,7 +315,6 @@ impl SongContext {
             } = note.content
             {
                 *end_time = time;
-                dbg!(&note);
                 Ok(Some(note))
             } else {
                 Err(TjaError::Unreachable(

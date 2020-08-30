@@ -16,6 +16,10 @@ pub struct Textures<'a> {
     pub note_ka: Texture<'a>,
     pub note_don_large: Texture<'a>,
     pub note_ka_large: Texture<'a>,
+    pub renda_left: Texture<'a>,
+    pub renda_right: Texture<'a>,
+    pub renda_large_left: Texture<'a>,
+    pub renda_large_right: Texture<'a>,
 }
 
 pub struct Chunks {
@@ -42,6 +46,26 @@ impl<'a> Assets<'a> {
             note_ka_large: load_texture_and_check_size(
                 tc,
                 img_dir.join("note_ka_large.png"),
+                (195, 195),
+            )?,
+            renda_left: load_texture_and_check_size(
+                tc,
+                img_dir.join("renda_left.png"),
+                (195, 195),
+            )?,
+            renda_right: load_texture_and_check_size(
+                tc,
+                img_dir.join("renda_right.png"),
+                (195, 195),
+            )?,
+            renda_large_left: load_texture_and_check_size(
+                tc,
+                img_dir.join("renda_large_left.png"),
+                (195, 195),
+            )?,
+            renda_large_right: load_texture_and_check_size(
+                tc,
+                img_dir.join("renda_large_right.png"),
                 (195, 195),
             )?,
         };

@@ -99,22 +99,19 @@ fn main() -> Result<(), TaikoError> {
                     repeat: false,
                     keycode: Some(keycode),
                     ..
-                } => {
-                    match keycode {
-                        Keycode::Space => {
-                            if let Some(ref music) = music {
-                                if playback_start.is_none() {
-                                    playback_start = Some(Instant::now());
-                                    music.play(0).map_err(|s| {
-                                        new_sdl_error("Failed to play wave file", s)
-                                    })?;
-                                }
+                } => match keycode {
+                    Keycode::Space => {
+                        if let Some(ref music) = music {
+                            if playback_start.is_none() {
+                                playback_start = Some(Instant::now());
+                                music
+                                    .play(0)
+                                    .map_err(|s| new_sdl_error("Failed to play wave file", s))?;
                             }
                         }
-                        _ => {}
                     }
-                    // }
-                }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -173,6 +170,39 @@ fn main() -> Result<(), TaikoError> {
                         canvas
                             .copy(texture, None, Rect::new(x as i32, 288, 195, 195))
                             .map_err(|e| new_sdl_error("Failed to draw a note", e))?;
+                    }
+                    tja::NoteContent::Renda {
+                        start_time,
+                        end_time,
+                        kind: tja::RendaKind::Unlimited { size },
+                    } => {
+                        let (texture_left, texture_right) = match size {
+                            tja::NoteSize::Small => {
+                                (&assets.textures.renda_left, &assets.textures.renda_right)
+                            }
+                            tja::NoteSize::Large => {
+                                (&assets.textures.renda_left, &assets.textures.renda_right)
+                            }
+                        };
+                        let xs = get_x(playback_start, &now, start_time, &note.scroll_speed) as i32;
+                        let xt = get_x(playback_start, &now, end_time, &note.scroll_speed) as i32;
+                        canvas
+                            .copy(
+                                texture_right,
+                                Rect::new(97, 0, 195 - 97, 195),
+                                Rect::new(xt + 97, 288, 195 - 97, 195),
+                            )
+                            .map_err(|e| new_sdl_error("Failed to draw renda right", e))?;
+                        canvas
+                            .copy(
+                                texture_right,
+                                Rect::new(0, 0, 97, 195),
+                                Rect::new(xs + 97, 288, (xt - xs) as u32, 195),
+                            )
+                            .map_err(|e| new_sdl_error("Failed to draw renda center", e))?;
+                        canvas
+                            .copy(texture_left, None, Rect::new(xs, 288, 195, 195))
+                            .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
                     }
                     _ => {}
                 }
