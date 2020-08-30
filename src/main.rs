@@ -136,7 +136,8 @@ fn main() -> Result<(), TaikoError> {
                 score: Some(score), ..
             }),
             Some(playback_start),
-        ) = (&song, &playback_start)
+            true
+        ) = (&song, &playback_start, &auto)
         {
             let now = Instant::now();
             for note in score.notes.iter() {
