@@ -2,6 +2,7 @@ use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use itertools::Itertools;
 use std::cmp::{max, min};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io;
 use std::io::{Error, Read};
@@ -39,6 +40,7 @@ pub struct Song {
     pub offset: f64,
     pub song_volume: u32,
     pub se_volume: u32,
+    pub balloons: Vec<u64>,
 
     pub score: Option<Score>, // will later be Vec<Score>
 }
@@ -112,7 +114,7 @@ pub struct BarLine {
 
 impl Default for Song {
     fn default() -> Self {
-        let (title, subtitle, wave, offset, score) = Default::default();
+        let (title, subtitle, wave, offset, balloons, score) = Default::default();
         Self {
             title,
             subtitle,
@@ -122,6 +124,7 @@ impl Default for Song {
             song_volume: 100, // default value is not asserted to be true
             se_volume: 100,   // default value is not asserted to be true
             score,
+            balloons,
         }
     }
 }
@@ -182,6 +185,7 @@ struct SongContext {
     bar_line: bool,
     gogo: bool,
     renda: Option<Note>,
+    balloons: VecDeque<u64>,
 }
 
 #[derive(Debug)]
@@ -222,6 +226,7 @@ impl SongContext {
             bar_line: true,
             gogo: false,
             renda,
+            balloons: song.balloons.iter().copied().collect(),
         }
     }
     fn terminate_measure(&mut self) -> Result<(), TjaError> {
@@ -256,8 +261,28 @@ impl SongContext {
                             }));
                             None
                         }
+                        '7' => {
+                            let quota = self.balloons.pop_front().unwrap_or(5);
+                            self.renda = Some(self.renda(RendaKind::Quota {
+                                kind: QuotaRendaKind::Balloon,
+                                quota
+                            }));
+                            None
+                        }
                         '8' => Self::terminate_renda(self.time, &mut self.renda)?,
-                        _ => None,
+                        '9' => {
+                            let quota = self.balloons.pop_front().unwrap_or(5);
+                            self.renda = Some(self.renda(RendaKind::Quota {
+                                kind: QuotaRendaKind::Potato,
+                                quota,
+                            }));
+                            None
+                        }
+                        _ => {
+                            return Err(TjaError::Unreachable(
+                                "NoteChar must contain characters between '0' and '9'",
+                            ));
+                        }
                     } {
                         self.score.notes.push(note);
                     }
@@ -315,6 +340,7 @@ impl SongContext {
             } = note.content
             {
                 *end_time = time;
+                dbg!(&note);
                 Ok(Some(note))
             } else {
                 Err(TjaError::Unreachable(
@@ -458,6 +484,8 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                         style: SubtitleStyle::Unspecified,
                     })
                 }
+            } else if let Some(_level) = take_remaining("LEVEL:", line) {
+                eprintln!("Warning: LEVEL not implemented");
             } else if let Some(bpm) = take_remaining("BPM:", line) {
                 // TODO error warnings and wider accepted format
                 if let Some(bpm) = bpm.parse_first() {
@@ -471,8 +499,11 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                 if let Some(offset) = offset.parse_first() {
                     song.offset = offset;
                 }
-            } else if let Some(_balloon) = take_remaining("BALLOON:", line) {
-                eprintln!("Warning: BALLOON not implemented");
+            } else if let Some(balloon) = take_remaining("BALLOON:", line) {
+                song.balloons = balloon
+                    .split(",")
+                    .filter_map(ParseFirst::parse_first)
+                    .collect_vec();
             } else if let Some(song_volume) = take_remaining("SONGVOL:", line) {
                 if let Some(song_volume) = song_volume.parse_first() {
                     song.song_volume = min(song_volume, 5000);
