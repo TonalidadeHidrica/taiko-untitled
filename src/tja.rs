@@ -265,7 +265,7 @@ impl SongContext {
                             let quota = self.balloons.pop_front().unwrap_or(5);
                             self.renda = Some(self.renda(RendaKind::Quota {
                                 kind: QuotaRendaKind::Balloon,
-                                quota
+                                quota,
                             }));
                             None
                         }
@@ -340,7 +340,6 @@ impl SongContext {
             } = note.content
             {
                 *end_time = time;
-                dbg!(&note);
                 Ok(Some(note))
             } else {
                 Err(TjaError::Unreachable(

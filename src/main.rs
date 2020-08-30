@@ -138,7 +138,7 @@ fn main() -> Result<(), TaikoError> {
                 .iter()
                 .filter_map(|bar_line| {
                     if bar_line.visible {
-                        let x = get_x(playback_start, &now, &bar_line.time, &bar_line.scroll_speed)
+                        let x = get_x(playback_start, &now, bar_line.time, &bar_line.scroll_speed)
                             as i32;
                         if 0 <= x && x <= 2000 {
                             // TODO magic number depending on 1920
@@ -156,7 +156,7 @@ fn main() -> Result<(), TaikoError> {
             for note in score.notes.iter().rev() {
                 match &note.content {
                     tja::NoteContent::Normal { time, color, size } => {
-                        let x = get_x(playback_start, &now, time, &note.scroll_speed);
+                        let x = get_x(playback_start, &now, *time, &note.scroll_speed);
                         let texture = match color {
                             tja::NoteColor::Don => match size {
                                 tja::NoteSize::Small => &assets.textures.note_don,
@@ -184,8 +184,9 @@ fn main() -> Result<(), TaikoError> {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
                             }
                         };
-                        let xs = get_x(playback_start, &now, start_time, &note.scroll_speed) as i32;
-                        let xt = get_x(playback_start, &now, end_time, &note.scroll_speed) as i32;
+                        let xs =
+                            get_x(playback_start, &now, *start_time, &note.scroll_speed) as i32;
+                        let xt = get_x(playback_start, &now, *end_time, &note.scroll_speed) as i32;
                         canvas
                             .copy(
                                 texture_right,
@@ -204,7 +205,29 @@ fn main() -> Result<(), TaikoError> {
                             .copy(texture_left, None, Rect::new(xs, 288, 195, 195))
                             .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
                     }
-                    _ => {}
+                    tja::NoteContent::Renda {
+                        start_time,
+                        end_time,
+                        kind: tja::RendaKind::Quota { .. },
+                    } => {
+                        let x = get_x(
+                            playback_start,
+                            &now,
+                            num::clamp(
+                                (now - *playback_start).as_secs_f64(),
+                                *start_time,
+                                *end_time,
+                            ),
+                            &note.scroll_speed,
+                        ) as i32;
+                        canvas
+                            .copy(
+                                &assets.textures.renda_left,
+                                None,
+                                Rect::new(x, 288, 195, 195),
+                            )
+                            .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
+                    }
                 }
             }
 
@@ -224,7 +247,7 @@ fn main() -> Result<(), TaikoError> {
     Ok(())
 }
 
-fn get_x(playback_start: &Instant, now: &Instant, time: &f64, scroll_speed: &Bpm) -> f64 {
+fn get_x(playback_start: &Instant, now: &Instant, time: f64, scroll_speed: &Bpm) -> f64 {
     let diff = time - (*now - *playback_start).as_secs_f64();
     520.0 + 1422.0 / 4.0 * diff / scroll_speed.get_beat_duration()
 }
