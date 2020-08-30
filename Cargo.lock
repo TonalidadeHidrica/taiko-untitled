@@ -285,6 +285,7 @@ dependencies = [
  "encoding_rs 0.8.24 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sdl2 0.34.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sdl2-sys 0.34.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.115 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

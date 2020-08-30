@@ -1,14 +1,15 @@
-use sdl2::event::Event;
-
-use std::time::{Duration, Instant};
-
+use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::mixer;
 use sdl2::mixer::{Channel, Music, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::rect::Rect;
+use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use sdl2::pixels::Color;
+use sdl2_sys;
+use std::convert::TryFrom;
+use std::ffi::c_void;
 use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
@@ -64,7 +65,7 @@ fn main() -> Result<(), TaikoError> {
         .map_err(|s| new_sdl_error("Failed to open audio stream", s))?;
     mixer::allocate_channels(128);
 
-    let assets = Assets::new(&texture_creator)?;
+    let mut assets = Assets::new(&texture_creator)?;
 
     let song = if let [_, tja_file_name, ..] = &std::env::args().collect_vec()[..] {
         Some(
@@ -76,9 +77,9 @@ fn main() -> Result<(), TaikoError> {
     };
     let music = match song {
         Some(Song {
-                 wave: Some(ref wave),
-                 ..
-             }) => Some(
+            wave: Some(ref wave),
+            ..
+        }) => Some(
             Music::from_file(wave)
                 .map_err(|s| new_sdl_error(format!("Failed to load wave file: {:?}", wave), s))?,
         ),
@@ -86,6 +87,11 @@ fn main() -> Result<(), TaikoError> {
     };
 
     let mut playback_start = None;
+
+    unsafe {
+        // let ptr: *mut Assets = &mut assets;
+        sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut Assets as *mut c_void);
+    }
 
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -96,29 +102,29 @@ fn main() -> Result<(), TaikoError> {
                     keycode: Some(keycode),
                     ..
                 } => {
-                    if let Some(sound) = match keycode {
-                        Keycode::X | Keycode::Slash => Some(&assets.chunks.sound_don),
-                        Keycode::Z | Keycode::Underscore => Some(&assets.chunks.sound_ka),
-                        _ => None,
-                    } {
-                        Channel::all()
-                            .play(&sound, 0)
-                            .map_err(|s| new_sdl_error("Failed to play sound effect", s))?;
-                    } else {
-                        match keycode {
-                            Keycode::Space => {
-                                if let Some(ref music) = music {
-                                    if playback_start.is_none() {
-                                        playback_start = Some(Instant::now());
-                                        music.play(0).map_err(|s| {
-                                            new_sdl_error("Failed to play wave file", s)
-                                        })?;
-                                    }
+                    // if let Some(sound) = match keycode {
+                    //     Keycode::X | Keycode::Slash => Some(&assets.chunks.sound_don),
+                    //     Keycode::Z | Keycode::Underscore => Some(&assets.chunks.sound_ka),
+                    //     _ => None,
+                    // } {
+                    //     Channel::all()
+                    //         .play(&sound, 0)
+                    //         .map_err(|s| new_sdl_error("Failed to play sound effect", s))?;
+                    // } else {
+                    match keycode {
+                        Keycode::Space => {
+                            if let Some(ref music) = music {
+                                if playback_start.is_none() {
+                                    playback_start = Some(Instant::now());
+                                    music.play(0).map_err(|s| {
+                                        new_sdl_error("Failed to play wave file", s)
+                                    })?;
                                 }
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
+                    // }
                 }
                 _ => {}
             }
@@ -133,8 +139,8 @@ fn main() -> Result<(), TaikoError> {
 
         if let (
             Some(Song {
-                     score: Some(score), ..
-                 }),
+                score: Some(score), ..
+            }),
             Some(playback_start),
         ) = (&song, &playback_start)
         {
@@ -198,4 +204,41 @@ fn main() -> Result<(), TaikoError> {
 fn get_x(playback_start: &Instant, now: &Instant, time: &f64, scroll_speed: &Bpm) -> f64 {
     let diff = time - (*now - *playback_start).as_secs_f64();
     520.0 + 1422.0 / 4.0 * diff / scroll_speed.get_beat_duration()
+}
+
+extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) -> i32 {
+    let raw = unsafe { *event };
+    let raw_type = unsafe { raw.type_ };
+
+    // if event type has not been defined, treat it as a UserEvent
+    let event_type: EventType = EventType::try_from(raw_type as u32).unwrap_or(EventType::User);
+    if let Some(keycode) = unsafe {
+        match event_type {
+            EventType::KeyDown => {
+                let event = raw.key;
+
+                // let event = Event::KeyDown {
+                //     timestamp: event.timestamp,
+                //     window_id: event.windowID,
+                //     keycode: Keycode::from_i32(event.keysym.sym as i32),
+                //     scancode: Scancode::from_i32(event.keysym.scancode as i32),
+                //     keymod: keyboard::Mod::from_bits_truncate(event.keysym.mod_),
+                //     repeat: event.repeat != 0,
+                // };
+                // Some(event)
+                Keycode::from_i32(event.keysym.sym as i32).filter(|_| event.repeat == 0)
+            }
+            _ => None,
+        }
+    } {
+        let chunks = unsafe { &(*(user_data as *mut Assets)).chunks };
+        if let Some(sound) = match keycode {
+            Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
+            Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
+            _ => None,
+        } {
+            Channel::all().play(&sound, 0).ok();
+        }
+    }
+    return 0;
 }
