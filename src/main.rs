@@ -8,13 +8,14 @@ use sdl2::mixer::{Channel, Music, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::rect::Rect;
 
 use itertools::Itertools;
+use sdl2::pixels::Color;
 use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
 };
 use taiko_untitled::tja;
-use taiko_untitled::tja::{load_tja_from_file, Song};
+use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -72,9 +73,9 @@ fn main() -> Result<(), TaikoError> {
     };
     let music = match song {
         Some(Song {
-                 wave: Some(ref wave),
-                 ..
-             }) => Some(
+            wave: Some(ref wave),
+            ..
+        }) => Some(
             Music::from_file(wave)
                 .map_err(|s| new_sdl_error(format!("Failed to load wave file: {:?}", wave), s))?,
         ),
@@ -129,19 +130,38 @@ fn main() -> Result<(), TaikoError> {
 
         if let (
             Some(Song {
-                     score: Some(score), ..
-                 }),
+                score: Some(score), ..
+            }),
             Some(playback_start),
         ) = (&song, &playback_start)
         {
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
             let now = Instant::now();
+            let rects = score
+                .bar_lines
+                .iter()
+                .filter_map(|bar_line| {
+                    if bar_line.visible {
+                        let x = get_x(playback_start, &now, &bar_line.time, &bar_line.scroll_speed)
+                            as i32;
+                        if 0 <= x && x <= 2000 {
+                            // TODO magic number depending on 1920
+                            return Some(Rect::new(x + 96, 288, 3, 195));
+                        }
+                    }
+                    None
+                })
+                .collect_vec();
+            canvas.set_draw_color(Color::RGB(200, 200, 200));
+            canvas
+                .fill_rects(&rects[..])
+                .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
+
             for note in score.notes.iter().rev() {
                 match &note.content {
                     tja::NoteContent::Normal { time, color, size } => {
-                        let diff = time - (now - *playback_start).as_secs_f64();
-                        let x = 520.0 + 1422.0 / 4.0 * diff / note.scroll_speed.get_beat_duration();
+                        let x = get_x(playback_start, &now, time, &note.scroll_speed);
                         let texture = match color {
                             tja::NoteColor::Don => match size {
                                 tja::NoteSize::Small => &assets.textures.note_don,
@@ -168,4 +188,9 @@ fn main() -> Result<(), TaikoError> {
     }
 
     Ok(())
+}
+
+fn get_x(playback_start: &Instant, now: &Instant, time: &f64, scroll_speed: &Bpm) -> f64 {
+    let diff = time - (*now - *playback_start).as_secs_f64();
+    520.0 + 1422.0 / 4.0 * diff / scroll_speed.get_beat_duration()
 }

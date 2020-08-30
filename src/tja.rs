@@ -94,9 +94,9 @@ pub enum QuotaRendaKind {
 
 #[derive(Debug)]
 pub struct BarLine {
-    time: f64,
-    scroll_speed: Bpm,
-    visible: bool,
+    pub time: f64,
+    pub scroll_speed: Bpm,
+    pub visible: bool,
 }
 
 impl Default for Song {
