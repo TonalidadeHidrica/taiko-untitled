@@ -12,6 +12,7 @@ use std::str::FromStr;
 pub enum TjaError {
     IoError(io::Error),
     DecodingError(DecodingError),
+    Unreachable(&'static str),
 }
 
 #[derive(Debug)]
@@ -66,6 +67,16 @@ pub enum NoteContent {
         start_time: f64,
         end_time: f64,
     },
+}
+
+impl NoteContent {
+    fn renda(time: f64, kind: RendaKind) -> Self {
+        Self::Renda {
+            kind,
+            start_time: time,
+            end_time: time,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -170,15 +181,18 @@ struct SongContext {
     hs: f64,
     bar_line: bool,
     gogo: bool,
+    renda: Option<Note>,
 }
 
 #[derive(Debug)]
 struct Measure(f64, f64);
+
 impl Default for Measure {
     fn default() -> Self {
         Measure(4.0, 4.0)
     }
 }
+
 impl Measure {
     pub fn get_beat_count(&self) -> f64 {
         self.0 / self.1 * 4.0
@@ -187,6 +201,7 @@ impl Measure {
 
 #[derive(Debug)]
 pub struct Bpm(f64);
+
 impl Bpm {
     pub fn get_beat_duration(&self) -> f64 {
         60.0 / self.0
@@ -195,7 +210,7 @@ impl Bpm {
 
 impl SongContext {
     fn new(song: &Song) -> SongContext {
-        let (player, elements, measure) = Default::default();
+        let (player, elements, measure, renda) = Default::default();
         SongContext {
             player,
             score: Score::default(),
@@ -206,9 +221,10 @@ impl SongContext {
             hs: 1.0,
             bar_line: true,
             gogo: false,
+            renda,
         }
     }
-    fn terminate_measure(&mut self) {
+    fn terminate_measure(&mut self) -> Result<(), TjaError> {
         let notes_count = self
             .elements
             .iter()
@@ -228,6 +244,19 @@ impl SongContext {
                         '2' => Some(self.note(true, false)),
                         '3' => Some(self.note(false, true)),
                         '4' => Some(self.note(true, true)),
+                        '5' => {
+                            self.renda = Some(self.renda(RendaKind::Unlimited {
+                                size: NoteSize::Small,
+                            }));
+                            None
+                        }
+                        '6' => {
+                            self.renda = Some(self.renda(RendaKind::Unlimited {
+                                size: NoteSize::Large,
+                            }));
+                            None
+                        }
+                        '8' => Self::terminate_renda(self.time, &mut self.renda)?,
                         _ => None,
                     } {
                         self.score.notes.push(note);
@@ -252,24 +281,49 @@ impl SongContext {
             }
         }
         self.elements.clear();
+        Ok(())
     }
     fn scroll_speed(&self) -> Bpm {
         Bpm(self.bpm.0 * self.hs)
     }
-    fn note(&self, ka: bool, large: bool) -> Note {
+    fn with_scroll_speed(&self, note_content: NoteContent) -> Note {
         Note {
             scroll_speed: self.scroll_speed(),
-            content: NoteContent::Normal {
-                color: match ka {
-                    false => NoteColor::Don,
-                    true => NoteColor::Ka,
-                },
-                size: match large {
-                    false => NoteSize::Small,
-                    true => NoteSize::Large,
-                },
-                time: self.time,
+            content: note_content,
+        }
+    }
+    fn note(&self, ka: bool, large: bool) -> Note {
+        self.with_scroll_speed(NoteContent::Normal {
+            color: match ka {
+                false => NoteColor::Don,
+                true => NoteColor::Ka,
             },
+            size: match large {
+                false => NoteSize::Small,
+                true => NoteSize::Large,
+            },
+            time: self.time,
+        })
+    }
+    fn renda(&self, renda_kind: RendaKind) -> Note {
+        self.with_scroll_speed(NoteContent::renda(self.time, renda_kind))
+    }
+    fn terminate_renda(time: f64, renda: &mut Option<Note>) -> Result<Option<Note>, TjaError> {
+        if let Some(mut note) = renda.take() {
+            if let NoteContent::Renda {
+                ref mut end_time, ..
+            } = note.content
+            {
+                *end_time = time;
+                dbg!(&note);
+                Ok(Some(note))
+            } else {
+                Err(TjaError::Unreachable(
+                    "Buffer should always have renda in it",
+                ))
+            }
+        } else {
+            Ok(None)
         }
     }
 }
@@ -369,7 +423,7 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                         _ => None,
                     }));
                 if split.next().is_some() {
-                    context.terminate_measure();
+                    context.terminate_measure()?;
                 }
             }
         } else {
