@@ -10,3 +10,6 @@ edition = "2018"
 sdl2 = { version = "0.34.2", features = ["image", "mixer"] }
 serde = { version = "1.0.115", features = ["derive"] }
 config = "0.10.1"
+encoding_rs = "0.8.24"
+chardetng = "0.1.9"
+itertools = "0.9.0"

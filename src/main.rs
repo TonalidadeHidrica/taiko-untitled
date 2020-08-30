@@ -7,8 +7,10 @@ use sdl2::mixer;
 use sdl2::mixer::{Channel, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::rect::Rect;
 
+use itertools::Itertools;
 use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::TaikoError;
+use taiko_untitled::tja::load_tja_from_file;
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -55,6 +57,15 @@ fn main() -> Result<(), TaikoError> {
     mixer::allocate_channels(128);
 
     let assets = Assets::new(&texture_creator)?;
+
+    if let [_, tja_file_name, ..] = &std::env::args().collect_vec()[..] {
+        load_tja_from_file(tja_file_name)
+            .map_err(|e| {
+                eprintln!("Failed to load tja file");
+                eprintln!("Caused by: {:?}", e);
+            })
+            .ok();
+    }
 
     'main: loop {
         for event in event_pump.poll_iter() {
