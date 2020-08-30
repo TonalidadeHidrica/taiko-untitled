@@ -3,21 +3,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TaikoConfig {
-    pub window: WindowSizeConfig,
+    pub window: WindowConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct WindowSizeConfig {
+pub struct WindowConfig {
     pub width: u32,
     pub height: u32,
+    pub vsync: bool,
+    pub fps: f64,
 }
 
 impl Default for TaikoConfig {
     fn default() -> Self {
         TaikoConfig {
-            window: WindowSizeConfig {
+            window: WindowConfig {
                 width: 1920,
                 height: 1080,
+                vsync: false,
+                fps: 60.0,
             },
         }
     }

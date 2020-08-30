@@ -35,8 +35,11 @@ fn main() -> Result<(), TaikoError> {
         .event_pump()
         .map_err(|s| new_sdl_error("Failed to initialize event pump for SDL", s))?;
 
-    let mut canvas = window
-        .into_canvas()
+    let mut canvas = window.into_canvas();
+    if config.window.vsync {
+        canvas = canvas.present_vsync();
+    }
+    let mut canvas = canvas
         .build()
         .map_err(|e| new_sdl_canvas_error("Failed to create SDL canvas", e))?;
     match canvas.output_size() {
@@ -73,9 +76,9 @@ fn main() -> Result<(), TaikoError> {
     };
     let music = match song {
         Some(Song {
-            wave: Some(ref wave),
-            ..
-        }) => Some(
+                 wave: Some(ref wave),
+                 ..
+             }) => Some(
             Music::from_file(wave)
                 .map_err(|s| new_sdl_error(format!("Failed to load wave file: {:?}", wave), s))?,
         ),
@@ -130,8 +133,8 @@ fn main() -> Result<(), TaikoError> {
 
         if let (
             Some(Song {
-                score: Some(score), ..
-            }),
+                     score: Some(score), ..
+                 }),
             Some(playback_start),
         ) = (&song, &playback_start)
         {
@@ -184,7 +187,9 @@ fn main() -> Result<(), TaikoError> {
         }
 
         canvas.present();
-        std::thread::sleep(Duration::from_secs_f64(1.0 / 60.0));
+        if !config.window.vsync {
+            std::thread::sleep(Duration::from_secs_f64(1.0 / config.window.fps));
+        }
     }
 
     Ok(())
