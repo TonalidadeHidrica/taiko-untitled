@@ -1,4 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::StreamConfig;
 use itertools::Itertools;
 use rodio::source::UniformSourceIterator;
 use rodio::Source;
@@ -23,7 +24,6 @@ use taiko_untitled::errors::{
 };
 use taiko_untitled::tja;
 use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
-use cpal::StreamConfig;
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -101,67 +101,8 @@ fn main() -> Result<(), TaikoError> {
     let mut auto_last_played = Instant::now();
     let mut renda_last_played = Instant::now();
 
-    // cpal audio configurations
-    let host = cpal::default_host();
-    let device = host.default_output_device().unwrap();
-    let mut supported_configs_range = device.supported_output_configs().unwrap();
-    let supported_config = supported_configs_range
-        .next()
-        .unwrap()
-        .with_max_sample_rate();
-    let stream_config: StreamConfig = supported_config.into();
-    dbg!(&stream_config);
-
-    let mut music = match song {
-        Some(Song {
-            wave: Some(ref wave),
-            ..
-        }) => {
-            let file = std::fs::File::open(wave).unwrap();
-            let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
-            let decoder = decoder.convert_samples::<f32>();
-            let decoder = UniformSourceIterator::new(
-                decoder,
-                stream_config.channels,
-                stream_config.sample_rate.0,
-            );
-            Some(decoder)
-        }
-        _ => None,
-    };
-
-    let playback_start_ptr = Arc::downgrade(&playback_start.clone());
-    let stream = device
-        .build_output_stream(
-            &stream_config,
-            // TODO `f32` actually depends on platforms
-            move |output: &mut [f32], callback_info: &cpal::OutputCallbackInfo| {
-                // let cpal::OutputStreamTimestamp { ref callback, ref playback } = callback_info.timestamp();
-                let playing = if let Some(playback_start_ptr) = playback_start_ptr.upgrade() {
-                    let playback_start = playback_start_ptr.as_ref().lock().unwrap();
-                    playback_start.is_some()
-                } else {
-                    false
-                };
-                for out in output {
-                    let next = if let (Some(ref mut music), true) = (&mut music, playing) {
-                        music.next()
-                    } else {
-                        None
-                    };
-                    *out = next.unwrap_or(0.0);
-                }
-                // for frame in output.chunks_mut(config.channels) {
-                //     let value = music.next().unwrap_or(0).into::<f32>();
-                //     for sample in frame.iter_mut() {
-                //         *sample = value;
-                //     }
-                // }
-            },
-            |err| eprintln!("an error occurred on stream: {:?}", err),
-        )
-        .unwrap();
-    stream.play().unwrap();
+    let audio_manager =
+        taiko_untitled::audio::AudioManager::new(song.as_ref().and_then(|song| song.wave.as_ref()));
 
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -176,6 +117,7 @@ fn main() -> Result<(), TaikoError> {
                         let mut playback_start = playback_start.lock().unwrap();
                         if playback_start.is_none() {
                             *playback_start = Some(Instant::now());
+                            audio_manager.play();
                         }
                     }
                     Keycode::F1 => {
