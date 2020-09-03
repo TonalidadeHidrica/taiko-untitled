@@ -4,12 +4,16 @@ use rodio::source::UniformSourceIterator;
 use rodio::Source;
 use std::io::BufReader;
 use std::path::Path;
-use std::sync::{Arc, Mutex, Weak};
-use std::time::Instant;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
 pub struct AudioManager {
     stream: Stream,
-    playing: Arc<Mutex<bool>>,
+    sender_to_audio: Sender<MessageToAudio>,
+}
+
+enum MessageToAudio {
+    Play,
 }
 
 impl AudioManager {
@@ -17,7 +21,7 @@ impl AudioManager {
     where
         P: AsRef<Path>,
     {
-        let playing = Arc::new(Mutex::new(false));
+        let (sender_to_audio, receiver_to_audio) = mpsc::channel();
 
         let host = cpal::default_host();
         let device = host.default_output_device().unwrap();
@@ -44,17 +48,14 @@ impl AudioManager {
             _ => None,
         };
 
-        let playing_ptr = Arc::downgrade(&playing.clone());
+        let mut playing = false;
         let stream = device
             .build_output_stream(
                 &stream_config,
                 // TODO `f32` actually depends on platforms
-                move |output: &mut [f32], callback_info: &cpal::OutputCallbackInfo| {
+                move |output: &mut [f32], _callback_info: &cpal::OutputCallbackInfo| {
                     // let cpal::OutputStreamTimestamp { ref callback, ref playback } = callback_info.timestamp();
-                    let playing = playing_ptr
-                        .upgrade()
-                        .map(|p| *p.lock().unwrap())
-                        .unwrap_or(false);
+                    playing = playing || receiver_to_audio.try_iter().count() > 0;
                     for out in output {
                         let next = if let (Some(ref mut music), true) = (&mut music, playing) {
                             music.next()
@@ -69,11 +70,14 @@ impl AudioManager {
             .unwrap();
         stream.play().unwrap();
 
-        AudioManager { stream, playing }
+        AudioManager {
+            stream,
+            sender_to_audio,
+        }
     }
 
     pub fn play(&self) {
-        let mut playing = self.playing.lock().unwrap();
-        *playing = true;
+        // TODO error propagation
+        self.sender_to_audio.send(MessageToAudio::Play).unwrap();
     }
 }

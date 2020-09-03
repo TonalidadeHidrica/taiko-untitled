@@ -1,20 +1,12 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::StreamConfig;
 use itertools::Itertools;
-use rodio::source::UniformSourceIterator;
-use rodio::Source;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::mixer;
 use sdl2::mixer::{Channel, Music, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
-use std::borrow::Borrow;
-use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::ffi::c_void;
-use std::io::BufReader;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use taiko_untitled::assets::Assets;
@@ -96,7 +88,7 @@ fn main() -> Result<(), TaikoError> {
         sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
     }
 
-    let mut playback_start = Arc::new(Mutex::new(None));
+    let playback_start = Arc::new(Mutex::new(None));
     let mut auto = false;
     let mut auto_last_played = Instant::now();
     let mut renda_last_played = Instant::now();
