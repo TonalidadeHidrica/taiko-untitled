@@ -1,12 +1,20 @@
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use itertools::Itertools;
+use rodio::source::UniformSourceIterator;
+use rodio::Source;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::mixer;
 use sdl2::mixer::{Channel, Music, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
+use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::ffi::c_void;
+use std::io::BufReader;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::{
@@ -15,6 +23,7 @@ use taiko_untitled::errors::{
 };
 use taiko_untitled::tja;
 use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
+use cpal::StreamConfig;
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -56,6 +65,7 @@ fn main() -> Result<(), TaikoError> {
     }
     let texture_creator = canvas.texture_creator();
 
+    // TODO SDL_mixer dependent
     // let _audio = sdl_context
     //     .audio()
     //     .map_err(|s| new_sdl_error("Failed to initialize audio subsystem of SDL", s))?;
@@ -80,26 +90,78 @@ fn main() -> Result<(), TaikoError> {
     } else {
         None
     };
-    let music = match song {
-        Some(Song {
-            wave: Some(ref wave),
-            ..
-        }) => Some(
-            Music::from_file(wave)
-                .map_err(|s| new_sdl_error(format!("Failed to load wave file: {:?}", wave), s))?,
-        ),
-        _ => None,
-    };
 
     unsafe {
         // variable `assets` is valid while this main function exists on the stack trace.
         sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
     }
 
-    let mut playback_start = None;
+    let mut playback_start = Arc::new(Mutex::new(None));
     let mut auto = false;
     let mut auto_last_played = Instant::now();
     let mut renda_last_played = Instant::now();
+
+    // cpal audio configurations
+    let host = cpal::default_host();
+    let device = host.default_output_device().unwrap();
+    let mut supported_configs_range = device.supported_output_configs().unwrap();
+    let supported_config = supported_configs_range
+        .next()
+        .unwrap()
+        .with_max_sample_rate();
+    let stream_config: StreamConfig = supported_config.into();
+    dbg!(&stream_config);
+
+    let mut music = match song {
+        Some(Song {
+            wave: Some(ref wave),
+            ..
+        }) => {
+            let file = std::fs::File::open(wave).unwrap();
+            let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
+            let decoder = decoder.convert_samples::<f32>();
+            let decoder = UniformSourceIterator::new(
+                decoder,
+                stream_config.channels,
+                stream_config.sample_rate.0,
+            );
+            Some(decoder)
+        }
+        _ => None,
+    };
+
+    let playback_start_ptr = Arc::downgrade(&playback_start.clone());
+    let stream = device
+        .build_output_stream(
+            &stream_config,
+            // TODO `f32` actually depends on platforms
+            move |output: &mut [f32], callback_info: &cpal::OutputCallbackInfo| {
+                // let cpal::OutputStreamTimestamp { ref callback, ref playback } = callback_info.timestamp();
+                let playing = if let Some(playback_start_ptr) = playback_start_ptr.upgrade() {
+                    let playback_start = playback_start_ptr.as_ref().lock().unwrap();
+                    playback_start.is_some()
+                } else {
+                    false
+                };
+                for out in output {
+                    let next = if let (Some(ref mut music), true) = (&mut music, playing) {
+                        music.next()
+                    } else {
+                        None
+                    };
+                    *out = next.unwrap_or(0.0);
+                }
+                // for frame in output.chunks_mut(config.channels) {
+                //     let value = music.next().unwrap_or(0).into::<f32>();
+                //     for sample in frame.iter_mut() {
+                //         *sample = value;
+                //     }
+                // }
+            },
+            |err| eprintln!("an error occurred on stream: {:?}", err),
+        )
+        .unwrap();
+    stream.play().unwrap();
 
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -111,13 +173,9 @@ fn main() -> Result<(), TaikoError> {
                     ..
                 } => match keycode {
                     Keycode::Space => {
-                        if let Some(ref music) = music {
-                            if playback_start.is_none() {
-                                playback_start = Some(Instant::now());
-                                music
-                                    .play(0)
-                                    .map_err(|s| new_sdl_error("Failed to play wave file", s))?;
-                            }
+                        let mut playback_start = playback_start.lock().unwrap();
+                        if playback_start.is_none() {
+                            *playback_start = Some(Instant::now());
                         }
                     }
                     Keycode::F1 => {
@@ -137,8 +195,11 @@ fn main() -> Result<(), TaikoError> {
             }),
             Some(playback_start),
             true,
-        ) = (&song, &playback_start, &auto)
-        {
+        ) = (
+            &song,
+            playback_start.as_ref().lock().unwrap().as_ref(),
+            &auto,
+        ) {
             let now = Instant::now();
             for note in score.notes.iter() {
                 match &note.content {
@@ -196,7 +257,7 @@ fn main() -> Result<(), TaikoError> {
                 score: Some(score), ..
             }),
             Some(playback_start),
-        ) = (&song, &playback_start)
+        ) = (&song, playback_start.as_ref().lock().unwrap().as_ref())
         {
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
