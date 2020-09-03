@@ -3,6 +3,7 @@ use cpal::{Stream, StreamConfig};
 use rodio::source::UniformSourceIterator;
 use rodio::Source;
 use std::io::BufReader;
+use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
@@ -38,7 +39,7 @@ impl AudioManager {
                 let file = std::fs::File::open(wave).unwrap();
                 let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
                 let decoder = decoder.convert_samples::<f32>();
-                let decoder = UniformSourceIterator::new(
+                let decoder = UniformSourceIterator::<_, f32>::new(
                     decoder,
                     stream_config.channels,
                     stream_config.sample_rate.0,
@@ -68,26 +69,28 @@ impl AudioManager {
     }
 }
 
-struct AudioThreadState<I> {
+struct AudioThreadState<T, I> {
     music: Option<I>,
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
+    _marker: PhantomData<fn() -> T>,
 }
 
-impl<I> AudioThreadState<I>
+impl<S, I> AudioThreadState<S, I>
 where
-    I: Iterator<Item = f32>,
+    S: rodio::Sample,
+    I: Iterator<Item = S>,
 {
     pub fn new(music: Option<I>, receiver_to_audio: mpsc::Receiver<MessageToAudio>) -> Self {
         AudioThreadState {
             music,
             receiver_to_audio,
             playing: false,
+            _marker: PhantomData,
         }
     }
 
-    fn data_callback(mut self) -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo) {
-        // TODO `f32` actually depends on platforms
+    fn data_callback(mut self) -> impl FnMut(&mut [S], &cpal::OutputCallbackInfo) {
         move |output, _callback_info| {
             // let cpal::OutputStreamTimestamp { ref callback, ref playback } = callback_info.timestamp();
             self.playing = self.playing || self.receiver_to_audio.try_iter().count() > 0;
@@ -97,7 +100,7 @@ where
                 } else {
                     None
                 };
-                *out = next.unwrap_or(0.0);
+                *out = next.unwrap_or_else(S::zero_value);
             }
         }
     }
