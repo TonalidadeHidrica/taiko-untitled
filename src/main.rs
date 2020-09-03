@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use num::Float;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::mixer;
@@ -88,10 +89,9 @@ fn main() -> Result<(), TaikoError> {
         sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
     }
 
-    let playback_start = Arc::new(Mutex::new(None));
     let mut auto = false;
-    let mut auto_last_played = Instant::now();
-    let mut renda_last_played = Instant::now();
+    let mut auto_last_played = f64::NEG_INFINITY;
+    let mut renda_last_played = f64::NEG_INFINITY;
 
     let audio_manager =
         taiko_untitled::audio::AudioManager::new(song.as_ref().and_then(|song| song.wave.as_ref()));
@@ -106,16 +106,13 @@ fn main() -> Result<(), TaikoError> {
                     ..
                 } => match keycode {
                     Keycode::Space => {
-                        let mut playback_start = playback_start.lock().unwrap();
-                        if playback_start.is_none() {
-                            *playback_start = Some(Instant::now());
-                            audio_manager.play();
-                        }
+                        audio_manager.play();
                     }
                     Keycode::F1 => {
                         auto = !auto;
                         dbg!(auto);
-                        auto_last_played = Instant::now();
+                        auto_last_played =
+                            audio_manager.music_position().unwrap_or(f64::NEG_INFINITY);
                     }
                     _ => {}
                 },
@@ -127,19 +124,14 @@ fn main() -> Result<(), TaikoError> {
             Some(Song {
                 score: Some(score), ..
             }),
-            Some(playback_start),
+            Some(music_position),
             true,
-        ) = (
-            &song,
-            playback_start.as_ref().lock().unwrap().as_ref(),
-            &auto,
-        ) {
-            let now = Instant::now();
+        ) = (&song, audio_manager.music_position(), &auto)
+        {
             for note in score.notes.iter() {
                 match &note.content {
                     tja::NoteContent::Normal { time, color, size } => {
-                        let time = *playback_start + Duration::from_secs_f64(*time);
-                        if !(auto_last_played < time && time <= now) {
+                        if !(auto_last_played < *time && *time <= music_position) {
                             continue;
                         }
                         let chunk = match color {
@@ -161,21 +153,19 @@ fn main() -> Result<(), TaikoError> {
                         end_time,
                         ..
                     } => {
-                        let start_time = *playback_start + Duration::from_secs_f64(*start_time);
-                        let end_time = *playback_start + Duration::from_secs_f64(*end_time);
-                        if end_time <= auto_last_played || now < start_time {
+                        if *end_time <= auto_last_played || music_position < *start_time {
                             continue;
                         }
-                        if now - renda_last_played > Duration::from_secs_f64(1.0 / 20.0) {
+                        if music_position - renda_last_played > 1.0 / 20.0 {
                             Channel::all()
                                 .play(&assets.chunks.sound_don, 0)
                                 .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
-                            renda_last_played = now;
+                            renda_last_played = music_position;
                         }
                     }
                 }
             }
-            auto_last_played = Instant::now();
+            auto_last_played = music_position;
         }
 
         canvas
@@ -190,19 +180,17 @@ fn main() -> Result<(), TaikoError> {
             Some(Song {
                 score: Some(score), ..
             }),
-            Some(playback_start),
-        ) = (&song, playback_start.as_ref().lock().unwrap().as_ref())
+            Some(music_position),
+        ) = (&song, audio_manager.music_position())
         {
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
-            let now = Instant::now();
             let rects = score
                 .bar_lines
                 .iter()
                 .filter_map(|bar_line| {
                     if bar_line.visible {
-                        let x = get_x(playback_start, &now, bar_line.time, &bar_line.scroll_speed)
-                            as i32;
+                        let x = get_x(music_position, bar_line.time, &bar_line.scroll_speed) as i32;
                         if 0 <= x && x <= 2000 {
                             // TODO magic number depending on 1920
                             return Some(Rect::new(x + 96, 288, 3, 195));
@@ -219,7 +207,7 @@ fn main() -> Result<(), TaikoError> {
             for note in score.notes.iter().rev() {
                 match &note.content {
                     tja::NoteContent::Normal { time, color, size } => {
-                        let x = get_x(playback_start, &now, *time, &note.scroll_speed);
+                        let x = get_x(music_position, *time, &note.scroll_speed);
                         let texture = match color {
                             tja::NoteColor::Don => match size {
                                 tja::NoteSize::Small => &assets.textures.note_don,
@@ -247,9 +235,8 @@ fn main() -> Result<(), TaikoError> {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
                             }
                         };
-                        let xs =
-                            get_x(playback_start, &now, *start_time, &note.scroll_speed) as i32;
-                        let xt = get_x(playback_start, &now, *end_time, &note.scroll_speed) as i32;
+                        let xs = get_x(music_position, *start_time, &note.scroll_speed) as i32;
+                        let xt = get_x(music_position, *end_time, &note.scroll_speed) as i32;
                         canvas
                             .copy(
                                 texture_right,
@@ -274,13 +261,8 @@ fn main() -> Result<(), TaikoError> {
                         kind: tja::RendaKind::Quota { .. },
                     } => {
                         let x = get_x(
-                            playback_start,
-                            &now,
-                            num::clamp(
-                                (now - *playback_start).as_secs_f64(),
-                                *start_time,
-                                *end_time,
-                            ),
+                            music_position,
+                            num::clamp(music_position, *start_time, *end_time),
                             &note.scroll_speed,
                         ) as i32;
                         canvas
@@ -310,8 +292,8 @@ fn main() -> Result<(), TaikoError> {
     Ok(())
 }
 
-fn get_x(playback_start: &Instant, now: &Instant, time: f64, scroll_speed: &Bpm) -> f64 {
-    let diff = time - (*now - *playback_start).as_secs_f64();
+fn get_x(music_position: f64, time: f64, scroll_speed: &Bpm) -> f64 {
+    let diff = time - music_position;
     520.0 + 1422.0 / 4.0 * diff / scroll_speed.get_beat_duration()
 }
 
