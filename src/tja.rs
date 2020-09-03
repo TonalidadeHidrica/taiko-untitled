@@ -500,7 +500,7 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                 }
             } else if let Some(balloon) = take_remaining("BALLOON:", line) {
                 song.balloons = balloon
-                    .split(",")
+                    .split(',')
                     .filter_map(ParseFirst::parse_first)
                     .collect_vec();
             } else if let Some(song_volume) = take_remaining("SONGVOL:", line) {
