@@ -15,3 +15,8 @@
 **/*.rs.bk
 
 # End of https://www.gitignore.io/api/Rust
+
+# Environmental configuration file
+/config.toml
+# Assets
+/assets/
