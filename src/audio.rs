@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
 pub struct AudioManager {
-    stream: Stream,
+    _stream: Stream,
     sender_to_audio: Sender<MessageToAudio>,
 }
 
@@ -33,7 +33,7 @@ impl AudioManager {
         let stream_config: StreamConfig = supported_config.into();
         dbg!(&stream_config);
 
-        let mut music = match wave.as_ref() {
+        let music = match wave.as_ref() {
             Some(wave) => {
                 let file = std::fs::File::open(wave).unwrap();
                 let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
@@ -48,30 +48,16 @@ impl AudioManager {
             _ => None,
         };
 
-        let mut playing = false;
+        let state = AudioThreadState::new(music, receiver_to_audio);
         let stream = device
-            .build_output_stream(
-                &stream_config,
-                // TODO `f32` actually depends on platforms
-                move |output: &mut [f32], _callback_info: &cpal::OutputCallbackInfo| {
-                    // let cpal::OutputStreamTimestamp { ref callback, ref playback } = callback_info.timestamp();
-                    playing = playing || receiver_to_audio.try_iter().count() > 0;
-                    for out in output {
-                        let next = if let (Some(ref mut music), true) = (&mut music, playing) {
-                            music.next()
-                        } else {
-                            None
-                        };
-                        *out = next.unwrap_or(0.0);
-                    }
-                },
-                |err| eprintln!("an error occurred on stream: {:?}", err),
-            )
+            .build_output_stream(&stream_config, state.data_callback(), |err| {
+                eprintln!("an error occurred on stream: {:?}", err)
+            })
             .unwrap();
         stream.play().unwrap();
 
         AudioManager {
-            stream,
+            _stream: stream,
             sender_to_audio,
         }
     }
@@ -79,5 +65,40 @@ impl AudioManager {
     pub fn play(&self) {
         // TODO error propagation
         self.sender_to_audio.send(MessageToAudio::Play).unwrap();
+    }
+}
+
+struct AudioThreadState<I> {
+    music: Option<I>,
+    receiver_to_audio: mpsc::Receiver<MessageToAudio>,
+    playing: bool,
+}
+
+impl<I> AudioThreadState<I>
+where
+    I: Iterator<Item = f32>,
+{
+    pub fn new(music: Option<I>, receiver_to_audio: mpsc::Receiver<MessageToAudio>) -> Self {
+        AudioThreadState {
+            music,
+            receiver_to_audio,
+            playing: false,
+        }
+    }
+
+    fn data_callback(mut self) -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo) {
+        // TODO `f32` actually depends on platforms
+        move |output, _callback_info| {
+            // let cpal::OutputStreamTimestamp { ref callback, ref playback } = callback_info.timestamp();
+            self.playing = self.playing || self.receiver_to_audio.try_iter().count() > 0;
+            for out in output {
+                let next = if let (Some(ref mut music), true) = (&mut self.music, self.playing) {
+                    music.next()
+                } else {
+                    None
+                };
+                *out = next.unwrap_or(0.0);
+            }
+        }
     }
 }
