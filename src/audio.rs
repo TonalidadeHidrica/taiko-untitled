@@ -236,6 +236,7 @@ pub struct SoundBuffer {
     data: Arc<Vec<f32>>,
     channels: ChannelCount,
     sample_rate: SampleRate,
+    volume: f32,
 }
 
 impl SoundBuffer {
@@ -256,13 +257,17 @@ impl SoundBuffer {
             data: Arc::new(decoded),
             channels,
             sample_rate,
+            volume: 1.0,
         })
     }
-    pub fn new_source(self: &Self) -> SoundBufferSource {
+    pub fn new_source(&self) -> SoundBufferSource {
         SoundBufferSource {
             sound_buffer: self.clone(),
             index: 0,
         }
+    }
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
     }
 }
 

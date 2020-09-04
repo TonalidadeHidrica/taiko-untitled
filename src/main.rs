@@ -60,17 +60,17 @@ fn main() -> Result<(), TaikoError> {
     // let _audio = sdl_context
     //     .audio()
     //     .map_err(|s| new_sdl_error("Failed to initialize audio subsystem of SDL", s))?;
-    mixer::open_audio(44100, AUDIO_S16LSB, DEFAULT_CHANNELS, 256)
-        .map_err(|s| new_sdl_error("Failed to open audio stream", s))?;
-    mixer::allocate_channels(128);
+    // mixer::open_audio(44100, AUDIO_S16LSB, DEFAULT_CHANNELS, 256)
+    //     .map_err(|s| new_sdl_error("Failed to open audio stream", s))?;
+    // mixer::allocate_channels(128);
 
     let audio_manager = taiko_untitled::audio::AudioManager::new();
 
     let mut assets = Assets::new(&texture_creator, &audio_manager)?;
     {
-        let volume = (128.0 * config.volume.se / 100.0) as i32;
-        assets.chunks.sound_don.set_volume(volume);
-        assets.chunks.sound_ka.set_volume(volume);
+        let volume = config.volume.se / 100.0;
+        assets.chunks.sound_don_buffered.set_volume(volume);
+        assets.chunks.sound_ka_buffered.set_volume(volume);
         let volume = (128.0 * config.volume.song / 100.0) as i32;
         Music::set_volume(volume);
     }
@@ -143,17 +143,18 @@ fn main() -> Result<(), TaikoError> {
                             continue;
                         }
                         let chunk = match color {
-                            tja::NoteColor::Don => &assets.chunks.sound_don,
-                            tja::NoteColor::Ka => &assets.chunks.sound_ka,
+                            tja::NoteColor::Don => &assets.chunks.sound_don_buffered,
+                            tja::NoteColor::Ka => &assets.chunks.sound_ka_buffered,
                         };
                         let count = match size {
                             tja::NoteSize::Small => 1,
                             tja::NoteSize::Large => 2,
                         };
                         for _ in 0..count {
-                            Channel::all()
-                                .play(chunk, 0)
-                                .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
+                            // Channel::all()
+                            //     .play(chunk, 0)
+                            //     .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
+                            audio_manager.add_play(chunk.new_source());
                         }
                     }
                     tja::NoteContent::Renda {
@@ -165,9 +166,10 @@ fn main() -> Result<(), TaikoError> {
                             continue;
                         }
                         if music_position - renda_last_played > 1.0 / 20.0 {
-                            Channel::all()
-                                .play(&assets.chunks.sound_don, 0)
-                                .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
+                            // Channel::all()
+                            //     .play(&assets.chunks.sound_don, 0)
+                            //     .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
+                            audio_manager.add_play(assets.chunks.sound_don_buffered.new_source());
                             renda_last_played = music_position;
                         }
                     }

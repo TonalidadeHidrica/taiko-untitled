@@ -17,8 +17,8 @@ pub struct WindowConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VolumeConfig {
-    pub song: f64,
-    pub se: f64,
+    pub song: f32,
+    pub se: f32,
 }
 
 impl Default for TaikoConfig {

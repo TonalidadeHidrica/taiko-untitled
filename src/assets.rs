@@ -24,8 +24,8 @@ pub struct Textures<'a> {
 }
 
 pub struct Chunks {
-    pub sound_don: Chunk,
-    pub sound_ka: Chunk,
+    // pub sound_don: Chunk,
+    // pub sound_ka: Chunk,
 
     pub sound_don_buffered: SoundBuffer,
     pub sound_ka_buffered: SoundBuffer,
@@ -86,10 +86,10 @@ impl<'a> Assets<'a> {
         let ret = Assets {
             textures,
             chunks: Chunks {
-                sound_don: Chunk::from_file(snd_dir.join("dong.ogg"))
-                    .map_err(|s| new_sdl_error("Failed to load 'don' sound", s))?,
-                sound_ka: Chunk::from_file(snd_dir.join("ka.ogg"))
-                    .map_err(|s| new_sdl_error("Failed to load 'ka' sound", s))?,
+                // sound_don: Chunk::from_file(snd_dir.join("dong.ogg"))
+                //     .map_err(|s| new_sdl_error("Failed to load 'don' sound", s))?,
+                // sound_ka: Chunk::from_file(snd_dir.join("ka.ogg"))
+                //     .map_err(|s| new_sdl_error("Failed to load 'ka' sound", s))?,
 
                 sound_don_buffered: load_sound(snd_dir.join("dong.ogg")).unwrap(),
                 sound_ka_buffered: load_sound(snd_dir.join("ka.ogg")).unwrap(),
