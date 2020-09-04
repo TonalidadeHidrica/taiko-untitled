@@ -1,8 +1,6 @@
 use itertools::Itertools;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
-use sdl2::mixer;
-use sdl2::mixer::{Channel, Music, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::convert::TryFrom;
@@ -56,23 +54,15 @@ fn main() -> Result<(), TaikoError> {
     }
     let texture_creator = canvas.texture_creator();
 
-    // TODO SDL_mixer dependent
-    // let _audio = sdl_context
-    //     .audio()
-    //     .map_err(|s| new_sdl_error("Failed to initialize audio subsystem of SDL", s))?;
-    // mixer::open_audio(44100, AUDIO_S16LSB, DEFAULT_CHANNELS, 256)
-    //     .map_err(|s| new_sdl_error("Failed to open audio stream", s))?;
-    // mixer::allocate_channels(128);
-
     let audio_manager = taiko_untitled::audio::AudioManager::new();
 
     let mut assets = Assets::new(&texture_creator, &audio_manager)?;
     {
         let volume = config.volume.se / 100.0;
-        assets.chunks.sound_don_buffered.set_volume(volume);
-        assets.chunks.sound_ka_buffered.set_volume(volume);
-        let volume = (128.0 * config.volume.song / 100.0) as i32;
-        Music::set_volume(volume);
+        assets.chunks.sound_don.set_volume(volume);
+        assets.chunks.sound_ka.set_volume(volume);
+        let volume = config.volume.song / 100.0;
+        audio_manager.set_music_volume(volume);
     }
 
     let song = if let [_, tja_file_name, ..] = &std::env::args().collect_vec()[..] {
@@ -115,12 +105,12 @@ fn main() -> Result<(), TaikoError> {
                         auto_last_played =
                             audio_manager.music_position().unwrap_or(f64::NEG_INFINITY);
                     }
-                    // Keycode::Slash => audio_manager.add_play(don_sound.new_source()),
+                    // TODO real-time input
                     Keycode::X | Keycode::Slash => {
-                        audio_manager.add_play(assets.chunks.sound_don_buffered.new_source())
+                        audio_manager.add_play(assets.chunks.sound_don.new_source())
                     }
                     Keycode::Z | Keycode::Underscore => {
-                        audio_manager.add_play(assets.chunks.sound_ka_buffered.new_source())
+                        audio_manager.add_play(assets.chunks.sound_ka.new_source())
                     }
                     _ => {}
                 },
@@ -143,17 +133,14 @@ fn main() -> Result<(), TaikoError> {
                             continue;
                         }
                         let chunk = match color {
-                            tja::NoteColor::Don => &assets.chunks.sound_don_buffered,
-                            tja::NoteColor::Ka => &assets.chunks.sound_ka_buffered,
+                            tja::NoteColor::Don => &assets.chunks.sound_don,
+                            tja::NoteColor::Ka => &assets.chunks.sound_ka,
                         };
                         let count = match size {
                             tja::NoteSize::Small => 1,
                             tja::NoteSize::Large => 2,
                         };
                         for _ in 0..count {
-                            // Channel::all()
-                            //     .play(chunk, 0)
-                            //     .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
                             audio_manager.add_play(chunk.new_source());
                         }
                     }
@@ -166,10 +153,7 @@ fn main() -> Result<(), TaikoError> {
                             continue;
                         }
                         if music_position - renda_last_played > 1.0 / 20.0 {
-                            // Channel::all()
-                            //     .play(&assets.chunks.sound_don, 0)
-                            //     .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
-                            audio_manager.add_play(assets.chunks.sound_don_buffered.new_source());
+                            audio_manager.add_play(assets.chunks.sound_don.new_source());
                             renda_last_played = music_position;
                         }
                     }
@@ -327,14 +311,14 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
     } {
         // `user_data` originates from `assets` variable in the `main` function stack frame,
         // which should be valid until the hook is removed.
-        let chunks = unsafe { &(*(user_data as *mut Assets)).chunks };
-        if let Some(sound) = match keycode {
-            // Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
-            // Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
-            _ => None,
-        } {
-            Channel::all().play(&sound, 0).ok();
-        }
+        // let chunks = unsafe { &(*(user_data as *mut Assets)).chunks };
+        // if let Some(sound) = match keycode {
+        //     Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
+        //     Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
+        //     _ => None,
+        // } {
+        //     Channel::all().play(&sound, 0).ok();
+        // }
     }
     0
 }
