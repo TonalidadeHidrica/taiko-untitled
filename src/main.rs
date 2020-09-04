@@ -16,85 +16,6 @@ use taiko_untitled::errors::{
 use taiko_untitled::tja;
 use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
 
-use rodio::Source;
-use std::io;
-use std::io::{BufReader, Read};
-use std::sync::Arc;
-
-#[derive(Clone)]
-pub struct SoundBuffer {
-    data: Arc<Vec<i16>>,
-    channels: u16,
-    sample_rate: u32,
-}
-
-impl SoundBuffer {
-    pub fn load(filename: &str) -> io::Result<SoundBuffer> {
-        use std::fs::File;
-        let file = File::open(filename)?;
-        let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
-        let channels = decoder.channels();
-        let sample_rate = decoder.sample_rate();
-        use std::time::Instant;
-        let start = Instant::now();
-        let decoded = decoder.collect_vec();
-        dbg!(Instant::now() - start);
-        Ok(SoundBuffer {
-            data: Arc::new(decoded),
-            channels,
-            sample_rate,
-        })
-    }
-    // pub fn cursor(self: &Self) -> io::Cursor<SoundBuffer> {
-    //     io::Cursor::new(SoundBuffer(self.0.clone()))
-    // }
-    // pub fn new_source(self: &Self) -> rodio::Decoder<io::Cursor<SoundBuffer>> {
-    //     rodio::Decoder::new(self.cursor()).unwrap()
-    // }
-    pub fn new_source(self: &Self) -> SoundBufferSource {
-        SoundBufferSource {
-            sound_buffer: self.clone(),
-            index: 0,
-        }
-    }
-}
-
-pub struct SoundBufferSource {
-    sound_buffer: SoundBuffer,
-    index: usize,
-}
-
-impl Iterator for SoundBufferSource {
-    type Item = i16;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let ret = self.sound_buffer.data.get(self.index).copied();
-        self.index += 1;
-        ret
-    }
-}
-
-impl Source for SoundBufferSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        Some(self.sound_buffer.data.len())
-    }
-
-    fn channels(&self) -> u16 {
-        self.sound_buffer.channels
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sound_buffer.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        Some(Duration::from_secs_f64(
-            (self.sound_buffer.data.len() as f64 / self.channels() as f64)
-                / (1.0 / self.sample_rate() as f64),
-        ))
-    }
-}
-
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
         .map_err(|e| new_config_error("Failed to load configuration", e))?;
@@ -145,7 +66,7 @@ fn main() -> Result<(), TaikoError> {
 
     let audio_manager = taiko_untitled::audio::AudioManager::new();
 
-    let mut assets = Assets::new(&texture_creator)?;
+    let mut assets = Assets::new(&texture_creator, &audio_manager)?;
     {
         let volume = (128.0 * config.volume.se / 100.0) as i32;
         assets.chunks.sound_don.set_volume(volume);
@@ -176,8 +97,6 @@ fn main() -> Result<(), TaikoError> {
         audio_manager.load_music(song_wave_path);
     }
 
-    let don_sound = SoundBuffer::load("assets/snd/dong.ogg").unwrap();
-
     'main: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -197,8 +116,12 @@ fn main() -> Result<(), TaikoError> {
                             audio_manager.music_position().unwrap_or(f64::NEG_INFINITY);
                     }
                     // Keycode::Slash => audio_manager.add_play(don_sound.new_source()),
-                    Keycode::X | Keycode::Slash => audio_manager.add_play(don_sound.new_source()),
-                    // Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
+                    Keycode::X | Keycode::Slash => {
+                        audio_manager.add_play(assets.chunks.sound_don_buffered.new_source())
+                    }
+                    Keycode::Z | Keycode::Underscore => {
+                        audio_manager.add_play(assets.chunks.sound_ka_buffered.new_source())
+                    }
                     _ => {}
                 },
                 _ => {}

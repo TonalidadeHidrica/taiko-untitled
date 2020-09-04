@@ -1,10 +1,13 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Stream, StreamConfig};
+use cpal::{ChannelCount, SampleRate, Stream, StreamConfig};
+use itertools::Itertools;
 use retain_mut::RetainMut;
 use rodio::source::UniformSourceIterator;
 use rodio::{Decoder, Source};
 use std::fs::File;
+use std::io;
 use std::io::BufReader;
+use std::io::Read;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -13,7 +16,7 @@ use std::time::{Duration, Instant};
 
 pub struct AudioManager {
     _stream: Stream,
-    stream_config: StreamConfig,
+    pub stream_config: StreamConfig,
     sender_to_audio: Sender<MessageToAudio>,
     playback_position: Arc<Mutex<Option<PlaybackPosition>>>,
 }
@@ -49,6 +52,7 @@ impl AudioManager {
             receiver_to_audio,
             Arc::downgrade(&playback_position.clone()),
         );
+        // TODO build output stream depending on supported configuration
         let stream = device
             .build_output_stream(&stream_config, state.data_callback::<f32>(), |err| {
                 eprintln!("an error occurred on stream: {:?}", err)
@@ -69,7 +73,8 @@ impl AudioManager {
         P: Into<PathBuf>,
     {
         self.sender_to_audio
-            .send(MessageToAudio::LoadMusic(path.into())).unwrap();
+            .send(MessageToAudio::LoadMusic(path.into()))
+            .unwrap();
     }
 
     pub fn play(&self) {
@@ -223,5 +228,76 @@ impl AudioThreadState {
             self.stream_config.sample_rate.0,
         );
         decoder
+    }
+}
+
+#[derive(Clone)]
+pub struct SoundBuffer {
+    data: Arc<Vec<f32>>,
+    channels: ChannelCount,
+    sample_rate: SampleRate,
+}
+
+impl SoundBuffer {
+    pub fn load<P>(
+        filename: P,
+        channels: ChannelCount,
+        sample_rate: SampleRate,
+    ) -> io::Result<SoundBuffer>
+    where
+        P: AsRef<Path>,
+    {
+        use std::fs::File;
+        let file = File::open(filename)?;
+        let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
+        let decoder = UniformSourceIterator::<_, f32>::new(decoder, channels, sample_rate.0);
+        let decoded = decoder.collect_vec();
+        Ok(SoundBuffer {
+            data: Arc::new(decoded),
+            channels,
+            sample_rate,
+        })
+    }
+    pub fn new_source(self: &Self) -> SoundBufferSource {
+        SoundBufferSource {
+            sound_buffer: self.clone(),
+            index: 0,
+        }
+    }
+}
+
+pub struct SoundBufferSource {
+    sound_buffer: SoundBuffer,
+    index: usize,
+}
+
+impl Iterator for SoundBufferSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.sound_buffer.data.get(self.index).copied();
+        self.index += 1;
+        ret
+    }
+}
+
+impl Source for SoundBufferSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(self.sound_buffer.data.len() - self.index)
+    }
+
+    fn channels(&self) -> u16 {
+        self.sound_buffer.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sound_buffer.sample_rate.0
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        Some(Duration::from_secs_f64(
+            (self.sound_buffer.data.len() as f64 / self.channels() as f64)
+                / (1.0 / self.sample_rate() as f64),
+        ))
     }
 }

@@ -1,3 +1,4 @@
+use crate::audio::{AudioManager, SoundBuffer};
 use crate::errors::{new_sdl_error, TaikoError, TaikoErrorCause};
 use sdl2::image::LoadTexture;
 use sdl2::mixer::Chunk;
@@ -25,13 +26,25 @@ pub struct Textures<'a> {
 pub struct Chunks {
     pub sound_don: Chunk,
     pub sound_ka: Chunk,
+
+    pub sound_don_buffered: SoundBuffer,
+    pub sound_ka_buffered: SoundBuffer,
 }
 
 impl<'a> Assets<'a> {
-    pub fn new(
+    pub fn new<'b>(
         texture_creator: &'a TextureCreator<WindowContext>,
+        audio_manager: &'b AudioManager,
     ) -> Result<Assets<'a>, TaikoError> {
         let tc = texture_creator;
+        let load_sound = |p| {
+            SoundBuffer::load(
+                p,
+                audio_manager.stream_config.channels,
+                audio_manager.stream_config.sample_rate,
+            )
+        };
+
         let assets_dir = Path::new("assets");
         let img_dir = assets_dir.join("img");
         let textures = Textures {
@@ -77,6 +90,9 @@ impl<'a> Assets<'a> {
                     .map_err(|s| new_sdl_error("Failed to load 'don' sound", s))?,
                 sound_ka: Chunk::from_file(snd_dir.join("ka.ogg"))
                     .map_err(|s| new_sdl_error("Failed to load 'ka' sound", s))?,
+
+                sound_don_buffered: load_sound(snd_dir.join("dong.ogg")).unwrap(),
+                sound_ka_buffered: load_sound(snd_dir.join("ka.ogg")).unwrap(),
             },
         };
         Ok(ret)
