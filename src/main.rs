@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use num::Float;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::mixer;
@@ -8,8 +7,7 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::convert::TryFrom;
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
@@ -17,6 +15,85 @@ use taiko_untitled::errors::{
 };
 use taiko_untitled::tja;
 use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
+
+use rodio::Source;
+use std::io;
+use std::io::{BufReader, Read};
+use std::sync::Arc;
+
+#[derive(Clone)]
+pub struct SoundBuffer {
+    data: Arc<Vec<i16>>,
+    channels: u16,
+    sample_rate: u32,
+}
+
+impl SoundBuffer {
+    pub fn load(filename: &str) -> io::Result<SoundBuffer> {
+        use std::fs::File;
+        let file = File::open(filename)?;
+        let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
+        use std::time::Instant;
+        let start = Instant::now();
+        let decoded = decoder.collect_vec();
+        dbg!(Instant::now() - start);
+        Ok(SoundBuffer {
+            data: Arc::new(decoded),
+            channels,
+            sample_rate,
+        })
+    }
+    // pub fn cursor(self: &Self) -> io::Cursor<SoundBuffer> {
+    //     io::Cursor::new(SoundBuffer(self.0.clone()))
+    // }
+    // pub fn new_source(self: &Self) -> rodio::Decoder<io::Cursor<SoundBuffer>> {
+    //     rodio::Decoder::new(self.cursor()).unwrap()
+    // }
+    pub fn new_source(self: &Self) -> SoundBufferSource {
+        SoundBufferSource {
+            sound_buffer: self.clone(),
+            index: 0,
+        }
+    }
+}
+
+pub struct SoundBufferSource {
+    sound_buffer: SoundBuffer,
+    index: usize,
+}
+
+impl Iterator for SoundBufferSource {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.sound_buffer.data.get(self.index).copied();
+        self.index += 1;
+        ret
+    }
+}
+
+impl Source for SoundBufferSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(self.sound_buffer.data.len())
+    }
+
+    fn channels(&self) -> u16 {
+        self.sound_buffer.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sound_buffer.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        Some(Duration::from_secs_f64(
+            (self.sound_buffer.data.len() as f64 / self.channels() as f64)
+                / (1.0 / self.sample_rate() as f64),
+        ))
+    }
+}
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -96,6 +173,8 @@ fn main() -> Result<(), TaikoError> {
     let audio_manager =
         taiko_untitled::audio::AudioManager::new(song.as_ref().and_then(|song| song.wave.as_ref()));
 
+    let don_sound = SoundBuffer::load("assets/snd/dong.ogg").unwrap();
+
     'main: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -114,6 +193,9 @@ fn main() -> Result<(), TaikoError> {
                         auto_last_played =
                             audio_manager.music_position().unwrap_or(f64::NEG_INFINITY);
                     }
+                    // Keycode::Slash => audio_manager.add_play(don_sound.new_source()),
+                    Keycode::X | Keycode::Slash => audio_manager.add_play(don_sound.new_source()),
+                    // Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
                     _ => {}
                 },
                 _ => {}
@@ -319,8 +401,8 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
         // which should be valid until the hook is removed.
         let chunks = unsafe { &(*(user_data as *mut Assets)).chunks };
         if let Some(sound) = match keycode {
-            Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
-            Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
+            // Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
+            // Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
             _ => None,
         } {
             Channel::all().play(&sound, 0).ok();

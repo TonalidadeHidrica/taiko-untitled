@@ -8,9 +8,11 @@ use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
+use retain_mut::RetainMut;
 
 pub struct AudioManager {
     _stream: Stream,
+    stream_config: StreamConfig,
     sender_to_audio: Sender<MessageToAudio>,
     playback_position: Arc<Mutex<Option<PlaybackPosition>>>,
 }
@@ -22,6 +24,7 @@ struct PlaybackPosition {
 
 enum MessageToAudio {
     Play,
+    AddPlay(Box<dyn Source<Item=f32> + Send>),
 }
 
 impl AudioManager {
@@ -64,7 +67,7 @@ impl AudioManager {
             Arc::downgrade(&playback_position.clone()),
         );
         let stream = device
-            .build_output_stream(&stream_config, state.data_callback(), |err| {
+            .build_output_stream(&stream_config, state.data_callback::<f32>(), |err| {
                 eprintln!("an error occurred on stream: {:?}", err)
             })
             .unwrap();
@@ -72,6 +75,7 @@ impl AudioManager {
 
         AudioManager {
             _stream: stream,
+            stream_config,
             sender_to_audio,
             playback_position,
         }
@@ -94,22 +98,35 @@ impl AudioManager {
             diff + playback_position.music_position
         })
     }
+
+    pub fn add_play<S>(&self, source: S)
+    where
+        S: Source + 'static + Send,
+        <S as Iterator>::Item: rodio::Sample + Send,
+    {
+        let source = UniformSourceIterator::<_, f32>::new(
+            source,
+            self.stream_config.channels,
+            self.stream_config.sample_rate.0,
+        );
+        self.sender_to_audio.send(MessageToAudio::AddPlay(Box::new(source))).unwrap();
+    }
 }
 
-struct AudioThreadState<T, I> {
+struct AudioThreadState<I> {
     stream_config: StreamConfig,
     music: Option<I>,
+    sound_effects: Vec<Box<dyn Source<Item=f32> + Send>>,
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
     played_sample_count: usize,
     playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
-    _marker: PhantomData<fn() -> T>,
+    // _marker: PhantomData<fn() -> T>,
 }
 
-impl<S, I> AudioThreadState<S, I>
+impl<I> AudioThreadState<I>
 where
-    S: rodio::Sample,
-    I: Iterator<Item = S>,
+    I: Iterator<Item = f32>,
 {
     pub fn new(
         stream_config: StreamConfig,
@@ -120,17 +137,30 @@ where
         AudioThreadState {
             stream_config,
             music,
+            sound_effects: Vec::new(),
             receiver_to_audio,
             playing: false,
             played_sample_count: 0,
             playback_position_ptr,
-            _marker: PhantomData,
+            // _marker: PhantomData,
         }
     }
 
-    fn data_callback(mut self) -> impl FnMut(&mut [S], &cpal::OutputCallbackInfo) {
+    fn data_callback<S>(mut self) -> impl FnMut(&mut [S], &cpal::OutputCallbackInfo)
+    where
+        S: rodio::Sample,
+    {
         move |output, callback_info| {
-            self.playing = self.playing || self.receiver_to_audio.try_iter().count() > 0;
+            let start = Instant::now();
+
+            for message in self.receiver_to_audio.try_iter() {
+                match message {
+                    MessageToAudio::Play => self.playing = true,
+                    MessageToAudio::AddPlay(source) => {
+                        self.sound_effects.push(source);
+                    }
+                }
+            }
 
             if self.playing {
                 let timestamp = callback_info.timestamp();
@@ -153,14 +183,39 @@ where
                 self.played_sample_count += output.len() / (self.stream_config.channels as usize);
             }
 
+            let mut first = true;
             for out in output.into_iter() {
-                let next = if let (Some(ref mut music), true) = (&mut self.music, self.playing) {
+                let mut next = if let (Some(ref mut music), true) = (&mut self.music, self.playing) {
                     music.next()
                 } else {
                     None
-                };
-                *out = next.unwrap_or_else(S::zero_value);
+                }.unwrap_or(0.0);
+
+                self.sound_effects.retain_mut(|source| {
+                    let start = if first {
+                        Some(Instant::now())
+                    } else {
+                        None
+                    };
+                    let ret = match source.next() {
+                        Some(value) => {
+                            next += value;
+                            true
+                        }
+                        None => false
+                    };
+                    if let Some(start) = start {
+                        // dbg!(Instant::now() - start);
+                    }
+                    ret
+                });
+                *out = S::from(&next);
+
+                first = false;
             }
+
+            // dbg!(self.sound_effects.len());
+            // dbg!(Instant::now() - start);
         }
     }
 }
