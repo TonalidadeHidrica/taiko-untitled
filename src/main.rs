@@ -143,6 +143,8 @@ fn main() -> Result<(), TaikoError> {
         .map_err(|s| new_sdl_error("Failed to open audio stream", s))?;
     mixer::allocate_channels(128);
 
+    let audio_manager = taiko_untitled::audio::AudioManager::new();
+
     let mut assets = Assets::new(&texture_creator)?;
     {
         let volume = (128.0 * config.volume.se / 100.0) as i32;
@@ -170,8 +172,9 @@ fn main() -> Result<(), TaikoError> {
     let mut auto_last_played = f64::NEG_INFINITY;
     let mut renda_last_played = f64::NEG_INFINITY;
 
-    let audio_manager =
-        taiko_untitled::audio::AudioManager::new(song.as_ref().and_then(|song| song.wave.as_ref()));
+    if let Some(song_wave_path) = song.as_ref().and_then(|song| song.wave.as_ref()) {
+        audio_manager.load_music(song_wave_path);
+    }
 
     let don_sound = SoundBuffer::load("assets/snd/dong.ogg").unwrap();
 

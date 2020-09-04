@@ -1,14 +1,15 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Stream, StreamConfig};
+use retain_mut::RetainMut;
 use rodio::source::UniformSourceIterator;
-use rodio::Source;
+use rodio::{Decoder, Source};
+use std::fs::File;
 use std::io::BufReader;
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
-use retain_mut::RetainMut;
 
 pub struct AudioManager {
     _stream: Stream,
@@ -24,14 +25,12 @@ struct PlaybackPosition {
 
 enum MessageToAudio {
     Play,
-    AddPlay(Box<dyn Source<Item=f32> + Send>),
+    LoadMusic(PathBuf),
+    AddPlay(Box<dyn Source<Item = f32> + Send>),
 }
 
 impl AudioManager {
-    pub fn new<P>(wave: Option<P>) -> AudioManager
-    where
-        P: AsRef<Path>,
-    {
+    pub fn new() -> AudioManager {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
         let playback_position = Arc::new(Mutex::new(None));
 
@@ -45,24 +44,8 @@ impl AudioManager {
         let stream_config: StreamConfig = supported_config.into();
         dbg!(&stream_config);
 
-        let music = match wave.as_ref() {
-            Some(wave) => {
-                let file = std::fs::File::open(wave).unwrap();
-                let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
-                let decoder = decoder.convert_samples::<f32>();
-                let decoder = UniformSourceIterator::<_, f32>::new(
-                    decoder,
-                    stream_config.channels,
-                    stream_config.sample_rate.0,
-                );
-                Some(decoder)
-            }
-            _ => None,
-        };
-
         let state = AudioThreadState::new(
             stream_config.clone(),
-            music,
             receiver_to_audio,
             Arc::downgrade(&playback_position.clone()),
         );
@@ -79,6 +62,14 @@ impl AudioManager {
             sender_to_audio,
             playback_position,
         }
+    }
+
+    pub fn load_music<P>(&self, path: P)
+    where
+        P: Into<PathBuf>,
+    {
+        self.sender_to_audio
+            .send(MessageToAudio::LoadMusic(path.into())).unwrap();
     }
 
     pub fn play(&self) {
@@ -109,14 +100,16 @@ impl AudioManager {
             self.stream_config.channels,
             self.stream_config.sample_rate.0,
         );
-        self.sender_to_audio.send(MessageToAudio::AddPlay(Box::new(source))).unwrap();
+        self.sender_to_audio
+            .send(MessageToAudio::AddPlay(Box::new(source)))
+            .unwrap();
     }
 }
 
-struct AudioThreadState<I> {
+struct AudioThreadState {
     stream_config: StreamConfig,
-    music: Option<I>,
-    sound_effects: Vec<Box<dyn Source<Item=f32> + Send>>,
+    music: Option<UniformSourceIterator<Decoder<BufReader<File>>, f32>>,
+    sound_effects: Vec<Box<dyn Source<Item = f32> + Send>>,
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
     played_sample_count: usize,
@@ -124,19 +117,15 @@ struct AudioThreadState<I> {
     // _marker: PhantomData<fn() -> T>,
 }
 
-impl<I> AudioThreadState<I>
-where
-    I: Iterator<Item = f32>,
-{
+impl AudioThreadState {
     pub fn new(
         stream_config: StreamConfig,
-        music: Option<I>,
         receiver_to_audio: mpsc::Receiver<MessageToAudio>,
         playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
     ) -> Self {
         AudioThreadState {
             stream_config,
-            music,
+            music: None,
             sound_effects: Vec::new(),
             receiver_to_audio,
             playing: false,
@@ -151,11 +140,12 @@ where
         S: rodio::Sample,
     {
         move |output, callback_info| {
-            let start = Instant::now();
+            // let start = Instant::now();
 
             for message in self.receiver_to_audio.try_iter() {
                 match message {
                     MessageToAudio::Play => self.playing = true,
+                    MessageToAudio::LoadMusic(path) => self.music = Some(self.load_music(path)),
                     MessageToAudio::AddPlay(source) => {
                         self.sound_effects.push(source);
                     }
@@ -183,39 +173,55 @@ where
                 self.played_sample_count += output.len() / (self.stream_config.channels as usize);
             }
 
-            let mut first = true;
+            // let mut first = true;
             for out in output.into_iter() {
-                let mut next = if let (Some(ref mut music), true) = (&mut self.music, self.playing) {
+                let mut next = if let (Some(ref mut music), true) = (&mut self.music, self.playing)
+                {
                     music.next()
                 } else {
                     None
-                }.unwrap_or(0.0);
+                }
+                .unwrap_or(0.0);
 
                 self.sound_effects.retain_mut(|source| {
-                    let start = if first {
-                        Some(Instant::now())
-                    } else {
-                        None
-                    };
+                    // let start = if first {
+                    //     Some(Instant::now())
+                    // } else {
+                    //     None
+                    // };
                     let ret = match source.next() {
                         Some(value) => {
                             next += value;
                             true
                         }
-                        None => false
+                        None => false,
                     };
-                    if let Some(start) = start {
-                        // dbg!(Instant::now() - start);
-                    }
+                    // if let Some(start) = start {
+                    //     dbg!(Instant::now() - start);
+                    // }
                     ret
                 });
                 *out = S::from(&next);
 
-                first = false;
+                // first = false;
             }
 
             // dbg!(self.sound_effects.len());
             // dbg!(Instant::now() - start);
         }
+    }
+
+    pub fn load_music(
+        &self,
+        wave: PathBuf,
+    ) -> UniformSourceIterator<Decoder<BufReader<File>>, f32> {
+        let file = std::fs::File::open(wave).unwrap();
+        let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
+        let decoder = UniformSourceIterator::<_, f32>::new(
+            decoder,
+            self.stream_config.channels,
+            self.stream_config.sample_rate.0,
+        );
+        decoder
     }
 }
