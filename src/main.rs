@@ -7,6 +7,7 @@ use std::convert::TryFrom;
 use std::ffi::c_void;
 use std::time::Duration;
 use taiko_untitled::assets::Assets;
+use taiko_untitled::audio::AudioManager;
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
@@ -74,9 +75,14 @@ fn main() -> Result<(), TaikoError> {
         None
     };
 
+    let mut event_callback_tuple = (&audio_manager, &assets);
     unsafe {
-        // variable `assets` is valid while this main function exists on the stack trace.
-        sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
+        // variables `audio_manager` and `assets` are valid
+        // while this main function exists on the stack.
+        sdl2_sys::SDL_AddEventWatch(
+            Some(callback),
+            &mut event_callback_tuple as *mut _ as *mut c_void,
+        );
     }
 
     let mut auto = false;
@@ -104,13 +110,6 @@ fn main() -> Result<(), TaikoError> {
                         dbg!(auto);
                         auto_last_played =
                             audio_manager.music_position().unwrap_or(f64::NEG_INFINITY);
-                    }
-                    // TODO real-time input
-                    Keycode::X | Keycode::Slash => {
-                        audio_manager.add_play(assets.chunks.sound_don.new_source())
-                    }
-                    Keycode::Z | Keycode::Underscore => {
-                        audio_manager.add_play(assets.chunks.sound_ka.new_source())
                     }
                     _ => {}
                 },
@@ -280,7 +279,10 @@ fn main() -> Result<(), TaikoError> {
     }
 
     unsafe {
-        sdl2_sys::SDL_DelEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
+        sdl2_sys::SDL_DelEventWatch(
+            Some(callback),
+            &mut event_callback_tuple as *mut _ as *mut c_void,
+        );
     }
 
     Ok(())
@@ -309,16 +311,21 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
             _ => None,
         }
     } {
-        // `user_data` originates from `assets` variable in the `main` function stack frame,
-        // which should be valid until the hook is removed.
-        // let chunks = unsafe { &(*(user_data as *mut Assets)).chunks };
-        // if let Some(sound) = match keycode {
-        //     Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
-        //     Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
-        //     _ => None,
-        // } {
-        //     Channel::all().play(&sound, 0).ok();
-        // }
+        // `user_data` originates from `audio_manager` and `assets` variables
+        // in the `main` function stack, which should be valid until the hook is removed.
+        let (audio_manager, assets) = unsafe {
+            // &(*(user_data as *mut Assets)).chunks
+            *(user_data as *mut (&AudioManager, &Assets))
+        };
+        match keycode {
+            Keycode::X | Keycode::Slash => {
+                audio_manager.add_play(assets.chunks.sound_don.new_source())
+            }
+            Keycode::Z | Keycode::Underscore => {
+                audio_manager.add_play(assets.chunks.sound_ka.new_source())
+            }
+            _ => {}
+        }
     }
     0
 }
