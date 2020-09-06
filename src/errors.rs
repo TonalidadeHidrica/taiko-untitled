@@ -1,10 +1,10 @@
 use crate::tja::TjaError;
 use config::ConfigError;
+use cpal::{BuildStreamError, PlayStreamError, SupportedStreamConfigsError};
+use rodio::decoder::DecoderError;
 use sdl2::video::WindowBuildError;
 use sdl2::IntegerOrSdlError;
 use std::io;
-use cpal::{SupportedStreamConfigsError, BuildStreamError, PlayStreamError};
-use rodio::decoder::DecoderError;
 
 #[derive(Debug)]
 pub struct TaikoError {
