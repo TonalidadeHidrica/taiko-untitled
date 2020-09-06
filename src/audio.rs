@@ -1,3 +1,4 @@
+use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleRate, Stream, StreamConfig};
 use itertools::Itertools;
@@ -5,7 +6,6 @@ use retain_mut::RetainMut;
 use rodio::source::UniformSourceIterator;
 use rodio::{Decoder, Source};
 use std::fs::File;
-use std::io;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -31,23 +31,29 @@ enum MessageToAudio {
     AddPlay(Box<dyn Source<Item = f32> + Send>),
 }
 
-impl Default for AudioManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl AudioManager {
-    pub fn new() -> AudioManager {
+    pub fn new() -> Result<AudioManager, TaikoError> {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
         let playback_position = Arc::new(Mutex::new(None));
 
         let host = cpal::default_host();
-        let device = host.default_output_device().unwrap();
-        let mut supported_configs_range = device.supported_output_configs().unwrap();
+        let device = host.default_output_device().ok_or_else(|| TaikoError {
+            message: "No default audio output device is available".to_string(),
+            cause: TaikoErrorCause::None,
+        })?;
+        let mut supported_configs_range =
+            device.supported_output_configs().map_err(|e| TaikoError {
+                message: "Audio output device is no longer valid".to_string(),
+                cause: TaikoErrorCause::CpalOrRodioError(
+                    CpalOrRodioError::SupportedStreamConfigsError(e),
+                ),
+            })?;
         let supported_config = supported_configs_range
             .next()
-            .unwrap()
+            .ok_or_else(|| TaikoError {
+                message: "No audio configuration is available".to_string(),
+                cause: TaikoErrorCause::None,
+            })?
             .with_max_sample_rate();
         let stream_config: StreamConfig = supported_config.into();
         dbg!(&stream_config);
@@ -62,38 +68,55 @@ impl AudioManager {
             .build_output_stream(&stream_config, state.data_callback::<f32>(), |err| {
                 eprintln!("an error occurred on stream: {:?}", err)
             })
-            .unwrap();
-        stream.play().unwrap();
+            .map_err(|e| TaikoError {
+                message: "Failed to build an audio output stream".to_string(),
+                cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::BuildStreamError(e)),
+            })?;
+        stream.play().map_err(|e| TaikoError {
+            message: "Failed to play the audio output stream".to_string(),
+            cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::PlayStreamError(e)),
+        })?;
 
-        AudioManager {
+        Ok(AudioManager {
             _stream: stream,
             stream_config,
             sender_to_audio,
             playback_position,
-        }
+        })
     }
 
-    pub fn load_music<P>(&self, path: P)
+    pub fn load_music<P>(&self, path: P) -> Result<(), TaikoError>
     where
         P: Into<PathBuf>,
     {
         self.sender_to_audio
             .send(MessageToAudio::LoadMusic(path.into()))
-            .unwrap();
+            .map_err(|_| TaikoError {
+                message: "Failed to load music; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
     }
 
-    pub fn play(&self) {
-        // TODO error propagation
-        self.sender_to_audio.send(MessageToAudio::Play).unwrap();
+    pub fn play(&self) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::Play)
+            .map_err(|_| TaikoError {
+                message: "Failed to play music; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
     }
 
-    pub fn set_music_volume(&self, volume: f32) {
+    pub fn set_music_volume(&self, volume: f32) -> Result<(), TaikoError> {
         self.sender_to_audio
             .send(MessageToAudio::SetMusicVolume(volume))
-            .unwrap();
+            .map_err(|_| TaikoError {
+                message: "Failed to set music volume; the audio stream has been stopped"
+                    .to_string(),
+                cause: TaikoErrorCause::None,
+            })
     }
 
-    pub fn add_play<S>(&self, source: S)
+    pub fn add_play<S>(&self, source: S) -> Result<(), TaikoError>
     where
         S: Source + 'static + Send,
         <S as Iterator>::Item: rodio::Sample + Send,
@@ -105,12 +128,19 @@ impl AudioManager {
         );
         self.sender_to_audio
             .send(MessageToAudio::AddPlay(Box::new(source)))
-            .unwrap();
+            .map_err(|_| TaikoError {
+                message: "Failed to play a chunk; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
     }
 
-    pub fn music_position(&self) -> Option<f64> {
-        let playback_position = self.playback_position.lock().unwrap();
-        playback_position.as_ref().map(|playback_position| {
+    pub fn music_position(&self) -> Result<Option<f64>, TaikoError> {
+        let playback_position = self.playback_position.lock().map_err(|_| TaikoError {
+            message: "Failed to obtain music position; the audio stream has been panicked"
+                .to_string(),
+            cause: TaikoErrorCause::None,
+        })?;
+        Ok(playback_position.as_ref().map(|playback_position| {
             let now = Instant::now();
             let diff = if now > playback_position.instant {
                 (now - playback_position.instant).as_secs_f64()
@@ -118,7 +148,7 @@ impl AudioManager {
                 -(playback_position.instant - now).as_secs_f64()
             };
             diff + playback_position.music_position
-        })
+        }))
     }
 }
 
@@ -159,7 +189,10 @@ impl AudioThreadState {
             for message in self.receiver_to_audio.try_iter() {
                 match message {
                     MessageToAudio::Play => self.playing = true,
-                    MessageToAudio::LoadMusic(path) => self.music = Some(self.load_music(path)),
+                    MessageToAudio::LoadMusic(path) => {
+                        // TODO send error via another channel
+                        self.music = Some(self.load_music(path).unwrap())
+                    }
                     MessageToAudio::SetMusicVolume(volume) => self.music_volume = volume,
                     MessageToAudio::AddPlay(source) => {
                         self.sound_effects.push(source);
@@ -178,7 +211,10 @@ impl AudioThreadState {
                     self.played_sample_count as f64 / self.stream_config.sample_rate.0 as f64;
 
                 if let Some(playback_position) = self.playback_position_ptr.upgrade() {
-                    let mut playback_position = playback_position.lock().unwrap();
+                    let mut playback_position = playback_position
+                        .lock()
+                        .map_err(|e| format!("The main thread has been panicked: {}", e))
+                        .unwrap(); // Intentionally panic when error
                     *playback_position = Some(PlaybackPosition {
                         instant,
                         music_position,
@@ -212,14 +248,20 @@ impl AudioThreadState {
     pub fn load_music(
         &self,
         wave: PathBuf,
-    ) -> UniformSourceIterator<Decoder<BufReader<File>>, f32> {
-        let file = std::fs::File::open(wave).unwrap();
-        let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
-        UniformSourceIterator::<_, f32>::new(
+    ) -> Result<UniformSourceIterator<Decoder<BufReader<File>>, f32>, TaikoError> {
+        let file = std::fs::File::open(wave).map_err(|e| TaikoError {
+            message: "Failed to open music file".to_string(),
+            cause: TaikoErrorCause::AudioLoadError(e),
+        })?;
+        let decoder = rodio::Decoder::new(BufReader::new(file)).map_err(|e| TaikoError {
+            message: "Failed to decode music".to_string(),
+            cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::DecoderError(e)),
+        })?;
+        Ok(UniformSourceIterator::<_, f32>::new(
             decoder,
             self.stream_config.channels,
             self.stream_config.sample_rate.0,
-        )
+        ))
     }
 }
 
@@ -236,12 +278,18 @@ impl SoundBuffer {
         filename: P,
         channels: ChannelCount,
         sample_rate: SampleRate,
-    ) -> io::Result<SoundBuffer>
+    ) -> Result<SoundBuffer, TaikoError>
     where
         P: AsRef<Path>,
     {
-        let file = File::open(filename)?;
-        let decoder = rodio::Decoder::new(BufReader::new(file)).unwrap();
+        let file = File::open(filename).map_err(|e| TaikoError {
+            message: "Failed to open sound chunk file".to_string(),
+            cause: TaikoErrorCause::AudioLoadError(e),
+        })?;
+        let decoder = rodio::Decoder::new(BufReader::new(file)).map_err(|e| TaikoError {
+            message: "Failed to decode sound chunk file".to_string(),
+            cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::DecoderError(e)),
+        })?;
         let decoder = UniformSourceIterator::<_, f32>::new(decoder, channels, sample_rate.0);
         let decoded = decoder.collect_vec();
         Ok(SoundBuffer {

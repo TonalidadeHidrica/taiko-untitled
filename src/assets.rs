@@ -32,17 +32,10 @@ impl<'a> Assets<'a> {
         texture_creator: &'a TextureCreator<WindowContext>,
         audio_manager: &'b AudioManager,
     ) -> Result<Assets<'a>, TaikoError> {
-        let tc = texture_creator;
-        let load_sound = |p| {
-            SoundBuffer::load(
-                p,
-                audio_manager.stream_config.channels,
-                audio_manager.stream_config.sample_rate,
-            )
-        };
-
         let assets_dir = Path::new("assets");
+
         let img_dir = assets_dir.join("img");
+        let tc = texture_creator;
         let textures = Textures {
             background: load_texture_and_check_size(tc, img_dir.join("game_bg.png"), (1920, 1080))?,
             note_don: load_texture_and_check_size(tc, img_dir.join("note_don.png"), (195, 195))?,
@@ -78,15 +71,21 @@ impl<'a> Assets<'a> {
                 (195, 195),
             )?,
         };
+
         let snd_dir = assets_dir.join("snd");
-        let ret = Assets {
-            textures,
-            chunks: Chunks {
-                sound_don: load_sound(snd_dir.join("dong.ogg")).unwrap(),
-                sound_ka: load_sound(snd_dir.join("ka.ogg")).unwrap(),
-            },
+        let load_sound = |filename| {
+            SoundBuffer::load(
+                snd_dir.join(filename),
+                audio_manager.stream_config.channels,
+                audio_manager.stream_config.sample_rate,
+            )
         };
-        Ok(ret)
+        let chunks = Chunks {
+            sound_don: load_sound("dong.ogg")?,
+            sound_ka: load_sound("ka.ogg")?,
+        };
+
+        Ok(Assets { textures, chunks })
     }
 }
 

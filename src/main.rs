@@ -55,7 +55,7 @@ fn main() -> Result<(), TaikoError> {
     }
     let texture_creator = canvas.texture_creator();
 
-    let audio_manager = taiko_untitled::audio::AudioManager::new();
+    let audio_manager = taiko_untitled::audio::AudioManager::new()?;
 
     let mut assets = Assets::new(&texture_creator, &audio_manager)?;
     {
@@ -63,7 +63,7 @@ fn main() -> Result<(), TaikoError> {
         assets.chunks.sound_don.set_volume(volume);
         assets.chunks.sound_ka.set_volume(volume);
         let volume = config.volume.song / 100.0;
-        audio_manager.set_music_volume(volume);
+        audio_manager.set_music_volume(volume)?;
     }
 
     let song = if let [_, tja_file_name, ..] = &std::env::args().collect_vec()[..] {
@@ -90,7 +90,7 @@ fn main() -> Result<(), TaikoError> {
     let mut renda_last_played = f64::NEG_INFINITY;
 
     if let Some(song_wave_path) = song.as_ref().and_then(|song| song.wave.as_ref()) {
-        audio_manager.load_music(song_wave_path);
+        audio_manager.load_music(song_wave_path)?;
     }
 
     'main: loop {
@@ -103,13 +103,13 @@ fn main() -> Result<(), TaikoError> {
                     ..
                 } => match keycode {
                     Keycode::Space => {
-                        audio_manager.play();
+                        audio_manager.play()?;
                     }
                     Keycode::F1 => {
                         auto = !auto;
                         dbg!(auto);
                         auto_last_played =
-                            audio_manager.music_position().unwrap_or(f64::NEG_INFINITY);
+                            audio_manager.music_position()?.unwrap_or(f64::NEG_INFINITY);
                     }
                     _ => {}
                 },
@@ -123,7 +123,7 @@ fn main() -> Result<(), TaikoError> {
             }),
             Some(music_position),
             true,
-        ) = (&song, audio_manager.music_position(), &auto)
+        ) = (&song, audio_manager.music_position()?, &auto)
         {
             for note in score.notes.iter() {
                 match &note.content {
@@ -140,7 +140,7 @@ fn main() -> Result<(), TaikoError> {
                             tja::NoteSize::Large => 2,
                         };
                         for _ in 0..count {
-                            audio_manager.add_play(chunk.new_source());
+                            audio_manager.add_play(chunk.new_source())?;
                         }
                     }
                     tja::NoteContent::Renda {
@@ -152,7 +152,7 @@ fn main() -> Result<(), TaikoError> {
                             continue;
                         }
                         if music_position - renda_last_played > 1.0 / 20.0 {
-                            audio_manager.add_play(assets.chunks.sound_don.new_source());
+                            audio_manager.add_play(assets.chunks.sound_don.new_source())?;
                             renda_last_played = music_position;
                         }
                     }
@@ -174,7 +174,7 @@ fn main() -> Result<(), TaikoError> {
                 score: Some(score), ..
             }),
             Some(music_position),
-        ) = (&song, audio_manager.music_position())
+        ) = (&song, audio_manager.music_position()?)
         {
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
@@ -319,10 +319,12 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
         };
         match keycode {
             Keycode::X | Keycode::Slash => {
-                audio_manager.add_play(assets.chunks.sound_don.new_source())
+                #[allow(unused_must_use)]
+                audio_manager.add_play(assets.chunks.sound_don.new_source());
             }
             Keycode::Z | Keycode::Underscore => {
-                audio_manager.add_play(assets.chunks.sound_ka.new_source())
+                #[allow(unused_must_use)]
+                audio_manager.add_play(assets.chunks.sound_ka.new_source());
             }
             _ => {}
         }
