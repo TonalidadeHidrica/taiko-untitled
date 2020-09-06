@@ -319,12 +319,12 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
         };
         match keycode {
             Keycode::X | Keycode::Slash => {
-                #[allow(unused_must_use)]
-                audio_manager.add_play(assets.chunks.sound_don.new_source());
+                // TODO send error to main thread
+                let _ = audio_manager.add_play(assets.chunks.sound_don.new_source());
             }
             Keycode::Z | Keycode::Underscore => {
-                #[allow(unused_must_use)]
-                audio_manager.add_play(assets.chunks.sound_ka.new_source());
+                // TODO send error to main thread
+                let _ = audio_manager.add_play(assets.chunks.sound_ka.new_source());
             }
             _ => {}
         }
