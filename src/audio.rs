@@ -29,7 +29,7 @@ enum MessageToAudio {
     Play,
     LoadMusic(PathBuf),
     SetMusicVolume(f32),
-    AddPlay(Box<dyn Source<Item = f32> + Send>),
+    AddPlay(SoundBufferSource),
 }
 
 impl AudioManager {
@@ -100,18 +100,10 @@ impl AudioManager {
             })
     }
 
-    pub fn add_play<S>(&self, source: S) -> Result<(), TaikoError>
-    where
-        S: Source + 'static + Send,
-        <S as Iterator>::Item: rodio::Sample + Send,
+    pub fn add_play(&self, buffer: &SoundBuffer) -> Result<(), TaikoError>
     {
-        let source = UniformSourceIterator::<_, f32>::new(
-            source,
-            self.stream_config.channels,
-            self.stream_config.sample_rate.0,
-        );
         self.sender_to_audio
-            .send(MessageToAudio::AddPlay(Box::new(source)))
+            .send(MessageToAudio::AddPlay(buffer.new_source()))
             .map_err(|_| TaikoError {
                 message: "Failed to play a chunk; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
@@ -194,7 +186,7 @@ impl Drop for AudioManager {
 struct AudioThreadState {
     stream_config: StreamConfig,
     music: Option<UniformSourceIterator<Decoder<BufReader<File>>, f32>>,
-    sound_effects: Vec<Box<dyn Source<Item = f32> + Send>>,
+    sound_effects: Vec<SoundBufferSource>,
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
     played_sample_count: usize,

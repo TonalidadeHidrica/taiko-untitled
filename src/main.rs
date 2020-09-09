@@ -140,7 +140,7 @@ fn main() -> Result<(), TaikoError> {
                             tja::NoteSize::Large => 2,
                         };
                         for _ in 0..count {
-                            audio_manager.add_play(chunk.new_source())?;
+                            audio_manager.add_play(chunk)?;
                         }
                     }
                     tja::NoteContent::Renda {
@@ -152,7 +152,7 @@ fn main() -> Result<(), TaikoError> {
                             continue;
                         }
                         if music_position - renda_last_played > 1.0 / 20.0 {
-                            audio_manager.add_play(assets.chunks.sound_don.new_source())?;
+                            audio_manager.add_play(&assets.chunks.sound_don)?;
                             renda_last_played = music_position;
                         }
                     }
@@ -320,11 +320,11 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
         match keycode {
             Keycode::X | Keycode::Slash => {
                 // TODO send error to main thread
-                let _ = audio_manager.add_play(assets.chunks.sound_don.new_source());
+                let _ = audio_manager.add_play(&assets.chunks.sound_don);
             }
             Keycode::Z | Keycode::Underscore => {
                 // TODO send error to main thread
-                let _ = audio_manager.add_play(assets.chunks.sound_ka.new_source());
+                let _ = audio_manager.add_play(&assets.chunks.sound_ka);
             }
             _ => {}
         }
