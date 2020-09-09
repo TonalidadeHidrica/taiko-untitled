@@ -8,14 +8,15 @@ use rodio::{Decoder, Source};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex, Weak};
+use std::thread;
 use std::time::{Duration, Instant};
 
 pub struct AudioManager {
-    _stream: Stream,
     pub stream_config: StreamConfig,
     sender_to_audio: Sender<MessageToAudio>,
+    drop_sender: Sender<()>,
     playback_position: Arc<Mutex<Option<PlaybackPosition>>>,
 }
 
@@ -34,53 +35,36 @@ enum MessageToAudio {
 impl AudioManager {
     pub fn new() -> Result<AudioManager, TaikoError> {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
+        let (stream_config_sender, stream_config_receiver) = mpsc::channel();
+        let (drop_sender, drop_receiver) = mpsc::channel();
         let playback_position = Arc::new(Mutex::new(None));
 
-        let host = cpal::default_host();
-        let device = host.default_output_device().ok_or_else(|| TaikoError {
-            message: "No default audio output device is available".to_string(),
-            cause: TaikoErrorCause::None,
-        })?;
-        let mut supported_configs_range =
-            device.supported_output_configs().map_err(|e| TaikoError {
-                message: "Audio output device is no longer valid".to_string(),
-                cause: TaikoErrorCause::CpalOrRodioError(
-                    CpalOrRodioError::SupportedStreamConfigsError(e),
-                ),
-            })?;
-        let supported_config = supported_configs_range
-            .next()
-            .ok_or_else(|| TaikoError {
-                message: "No audio configuration is available".to_string(),
-                cause: TaikoErrorCause::None,
-            })?
-            .with_max_sample_rate();
-        let stream_config: StreamConfig = supported_config.into();
-        dbg!(&stream_config);
-
-        let state = AudioThreadState::new(
-            stream_config.clone(),
-            receiver_to_audio,
-            Arc::downgrade(&playback_position),
+        let playback_position_ptr = Arc::downgrade(&playback_position);
+        thread::spawn(
+            move || match stream_thread(receiver_to_audio, playback_position_ptr) {
+                Err(err) => {
+                    if stream_config_sender.send(Err(err)).is_err() {
+                        eprintln!("Failed to send error info to main thread.");
+                    }
+                }
+                Ok((stream_config, _stream)) => {
+                    if stream_config_sender.send(Ok(stream_config)).is_err() {
+                        eprintln!("Failed to send stream config to main thread.");
+                    }
+                    // preserve stream until "drop" signal is sent from main thread
+                    drop_receiver.recv().ok();
+                }
+            },
         );
-        // TODO build output stream depending on supported configuration
-        let stream = device
-            .build_output_stream(&stream_config, state.data_callback::<f32>(), |err| {
-                eprintln!("an error occurred on stream: {:?}", err)
-            })
-            .map_err(|e| TaikoError {
-                message: "Failed to build an audio output stream".to_string(),
-                cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::BuildStreamError(e)),
-            })?;
-        stream.play().map_err(|e| TaikoError {
-            message: "Failed to play the audio output stream".to_string(),
-            cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::PlayStreamError(e)),
-        })?;
+        let stream_config = stream_config_receiver.recv().map_err(|_| TaikoError {
+            message: "Audio device initialization thread has been stopped".to_string(),
+            cause: TaikoErrorCause::None,
+        })??;
 
         Ok(AudioManager {
-            _stream: stream,
             stream_config,
             sender_to_audio,
+            drop_sender,
             playback_position,
         })
     }
@@ -149,6 +133,61 @@ impl AudioManager {
             };
             diff + playback_position.music_position
         }))
+    }
+}
+
+fn stream_thread(
+    receiver_to_audio: Receiver<MessageToAudio>,
+    playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
+) -> Result<(StreamConfig, Stream), TaikoError> {
+    let host = cpal::default_host();
+    let device = host.default_output_device().ok_or_else(|| TaikoError {
+        message: "No default audio output device is available".to_string(),
+        cause: TaikoErrorCause::None,
+    })?;
+    let mut supported_configs_range =
+        device.supported_output_configs().map_err(|e| TaikoError {
+            message: "Audio output device is no longer valid".to_string(),
+            cause: TaikoErrorCause::CpalOrRodioError(
+                CpalOrRodioError::SupportedStreamConfigsError(e),
+            ),
+        })?;
+    let supported_config = supported_configs_range
+        .next()
+        .ok_or_else(|| TaikoError {
+            message: "No audio configuration is available".to_string(),
+            cause: TaikoErrorCause::None,
+        })?
+        .with_max_sample_rate();
+    let stream_config: StreamConfig = supported_config.into();
+    dbg!(&stream_config);
+
+    let state = AudioThreadState::new(
+        stream_config.clone(),
+        receiver_to_audio,
+        playback_position_ptr,
+    );
+    // TODO build output stream depending on supported configuration
+    let stream = device
+        .build_output_stream(&stream_config, state.data_callback::<f32>(), |err| {
+            eprintln!("an error occurred on stream: {:?}", err)
+        })
+        .map_err(|e| TaikoError {
+            message: "Failed to build an audio output stream".to_string(),
+            cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::BuildStreamError(e)),
+        })?;
+    stream.play().map_err(|e| TaikoError {
+        message: "Failed to play the audio output stream".to_string(),
+        cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::PlayStreamError(e)),
+    })?;
+    Ok((stream_config, stream))
+}
+
+impl Drop for AudioManager {
+    fn drop(&mut self) {
+        if self.drop_sender.send(()).is_err() {
+            eprintln!("Failed to send drop signal to audio stream thread");
+        }
     }
 }
 
