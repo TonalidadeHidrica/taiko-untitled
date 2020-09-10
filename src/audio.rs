@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{ChannelCount, SampleRate, Stream, StreamConfig};
+use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
 use itertools::Itertools;
 use retain_mut::RetainMut;
 use rodio::source::UniformSourceIterator;
@@ -152,6 +152,8 @@ fn stream_thread(
             cause: TaikoErrorCause::None,
         })?
         .with_max_sample_rate();
+    dbg!(&supported_config);
+    let sample_format = supported_config.sample_format();
     let stream_config: StreamConfig = supported_config.into();
     dbg!(&stream_config);
 
@@ -160,15 +162,22 @@ fn stream_thread(
         receiver_to_audio,
         playback_position_ptr,
     );
-    // TODO build output stream depending on supported configuration
-    let stream = device
-        .build_output_stream(&stream_config, state.data_callback::<f32>(), |err| {
-            eprintln!("an error occurred on stream: {:?}", err)
-        })
-        .map_err(|e| TaikoError {
-            message: "Failed to build an audio output stream".to_string(),
-            cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::BuildStreamError(e)),
-        })?;
+    let error_callback = |err| eprintln!("an error occurred on stream: {:?}", err);
+    let stream = match sample_format {
+        SampleFormat::F32 => {
+            device.build_output_stream(&stream_config, state.data_callback::<f32>(), error_callback)
+        }
+        SampleFormat::I16 => {
+            device.build_output_stream(&stream_config, state.data_callback::<i16>(), error_callback)
+        }
+        SampleFormat::U16 => {
+            device.build_output_stream(&stream_config, state.data_callback::<u16>(), error_callback)
+        }
+    };
+    let stream = stream.map_err(|e| TaikoError {
+        message: "Failed to build an audio output stream".to_string(),
+        cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::BuildStreamError(e)),
+    })?;
     stream.play().map_err(|e| TaikoError {
         message: "Failed to play the audio output stream".to_string(),
         cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::PlayStreamError(e)),
