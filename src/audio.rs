@@ -1,10 +1,3 @@
-use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{ChannelCount, SampleRate, Stream, StreamConfig};
-use itertools::Itertools;
-use retain_mut::RetainMut;
-use rodio::source::UniformSourceIterator;
-use rodio::{Decoder, Source};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -12,6 +5,15 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{ChannelCount, SampleRate, Stream, StreamConfig};
+use itertools::Itertools;
+use retain_mut::RetainMut;
+use rodio::source::UniformSourceIterator;
+use rodio::{Decoder, Source};
+
+use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
 
 pub struct AudioManager {
     pub stream_config: StreamConfig,
@@ -100,8 +102,7 @@ impl AudioManager {
             })
     }
 
-    pub fn add_play(&self, buffer: &SoundBuffer) -> Result<(), TaikoError>
-    {
+    pub fn add_play(&self, buffer: &SoundBuffer) -> Result<(), TaikoError> {
         self.sender_to_audio
             .send(MessageToAudio::AddPlay(buffer.new_source()))
             .map_err(|_| TaikoError {
