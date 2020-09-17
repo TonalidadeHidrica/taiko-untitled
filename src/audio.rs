@@ -1,3 +1,11 @@
+use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
+use itertools::Itertools;
+use retain_mut::RetainMut;
+use rodio::source::UniformSourceIterator;
+use rodio::{Decoder, Source};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -5,15 +13,6 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
-use itertools::Itertools;
-use retain_mut::RetainMut;
-use rodio::source::UniformSourceIterator;
-use rodio::{Decoder, Source};
-
-use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
 
 pub struct AudioManager {
     pub stream_config: StreamConfig,
@@ -32,6 +31,7 @@ enum MessageToAudio {
     LoadMusic(PathBuf),
     SetMusicVolume(f32),
     AddPlay(SoundBufferSource),
+    AddSchedules(Vec<SoundEffectSchedule>),
 }
 
 impl AudioManager {
@@ -107,6 +107,18 @@ impl AudioManager {
             .send(MessageToAudio::AddPlay(buffer.new_source()))
             .map_err(|_| TaikoError {
                 message: "Failed to play a chunk; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn add_play_schedules(
+        &self,
+        schedules: Vec<SoundEffectSchedule>,
+    ) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::AddSchedules(schedules))
+            .map_err(|_| TaikoError {
+                message: "Failed to push schedules; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -195,13 +207,22 @@ impl Drop for AudioManager {
 
 struct AudioThreadState {
     stream_config: StreamConfig,
+
     music: Option<UniformSourceIterator<Decoder<BufReader<File>>, f32>>,
     sound_effects: Vec<SoundBufferSource>,
+
+    sound_effect_schedules: VecDeque<SoundEffectSchedule>,
+
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
     played_sample_count: usize,
     playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
     music_volume: f32,
+}
+
+pub struct SoundEffectSchedule {
+    pub timestamp: f64,
+    pub source: SoundBufferSource,
 }
 
 impl AudioThreadState {
@@ -214,6 +235,7 @@ impl AudioThreadState {
             stream_config,
             music: None,
             sound_effects: Vec::new(),
+            sound_effect_schedules: VecDeque::new(),
             receiver_to_audio,
             playing: false,
             played_sample_count: 0,
@@ -238,6 +260,13 @@ impl AudioThreadState {
                     MessageToAudio::AddPlay(source) => {
                         self.sound_effects.push(source);
                     }
+                    MessageToAudio::AddSchedules(mut schedules) => {
+                        schedules.sort_unstable_by(|x, y| {
+                            x.timestamp.partial_cmp(&y.timestamp).unwrap()
+                        });
+                        // TODO check for time rollback
+                        self.sound_effect_schedules.extend(schedules.into_iter());
+                    }
                 }
             }
 
@@ -248,8 +277,13 @@ impl AudioThreadState {
                         .playback
                         .duration_since(&timestamp.callback)
                         .unwrap_or_else(|| Duration::from_nanos(0));
-                let music_position =
+
+                let playing_sample_count = output.len() / (self.stream_config.channels as usize);
+
+                let music_position_start =
                     self.played_sample_count as f64 / self.stream_config.sample_rate.0 as f64;
+                let music_position_end = (self.played_sample_count + playing_sample_count) as f64
+                    / self.stream_config.sample_rate.0 as f64;
 
                 if let Some(playback_position) = self.playback_position_ptr.upgrade() {
                     let mut playback_position = playback_position
@@ -258,11 +292,24 @@ impl AudioThreadState {
                         .unwrap(); // Intentionally panic when error
                     *playback_position = Some(PlaybackPosition {
                         instant,
-                        music_position,
+                        music_position: music_position_start,
                     });
                 }
 
-                self.played_sample_count += output.len() / (self.stream_config.channels as usize);
+                while let Some(next) = self.sound_effect_schedules.front() {
+                    if music_position_end <= next.timestamp {
+                        break;
+                    }
+                    let next = self.sound_effect_schedules.pop_front().unwrap();
+                    let mut source = next.source;
+                    source.wait = (self.stream_config.channels as f64
+                        * (next.timestamp - music_position_start)
+                        * self.stream_config.sample_rate.0 as f64)
+                        as usize;
+                    self.sound_effects.push(source);
+                }
+
+                self.played_sample_count += playing_sample_count;
             }
 
             for out in output.iter_mut() {
@@ -343,6 +390,7 @@ impl SoundBuffer {
     pub fn new_source(&self) -> SoundBufferSource {
         SoundBufferSource {
             sound_buffer: self.clone(),
+            wait: 0,
             index: 0,
         }
     }
@@ -353,6 +401,7 @@ impl SoundBuffer {
 
 pub struct SoundBufferSource {
     sound_buffer: SoundBuffer,
+    wait: usize,
     index: usize,
 }
 
@@ -360,14 +409,19 @@ impl Iterator for SoundBufferSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let ret = self
-            .sound_buffer
-            .data
-            .get(self.index)
-            .copied()
-            .map(|a| a * self.sound_buffer.volume);
-        self.index += 1;
-        ret
+        if self.wait > 0 {
+            self.wait -= 1;
+            Some(0.0)
+        } else {
+            let ret = self
+                .sound_buffer
+                .data
+                .get(self.index)
+                .copied()
+                .map(|a| a * self.sound_buffer.volume);
+            self.index += 1;
+            ret
+        }
     }
 }
 

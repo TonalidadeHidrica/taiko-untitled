@@ -5,9 +5,10 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::convert::TryFrom;
 use std::ffi::c_void;
+use std::iter;
 use std::time::Duration;
 use taiko_untitled::assets::Assets;
-use taiko_untitled::audio::AudioManager;
+use taiko_untitled::audio::{AudioManager, SoundEffectSchedule};
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
@@ -86,11 +87,54 @@ fn main() -> Result<(), TaikoError> {
     }
 
     let mut auto = false;
-    let mut auto_last_played = f64::NEG_INFINITY;
-    let mut renda_last_played = f64::NEG_INFINITY;
+    // let mut auto_last_played = f64::NEG_INFINITY;
+    // let mut renda_last_played = f64::NEG_INFINITY;
 
     if let Some(song_wave_path) = song.as_ref().and_then(|song| song.wave.as_ref()) {
         audio_manager.load_music(song_wave_path)?;
+    }
+
+    if let Some(Song {
+        score: Some(score), ..
+    }) = &song
+    {
+        let mut schedules = Vec::new();
+        for note in &score.notes {
+            match &note.content {
+                tja::NoteContent::Normal { time, color, size } => {
+                    let chunk = match color {
+                        tja::NoteColor::Don => &assets.chunks.sound_don,
+                        tja::NoteColor::Ka => &assets.chunks.sound_ka,
+                    };
+                    let count = match size {
+                        tja::NoteSize::Small => 1,
+                        tja::NoteSize::Large => 2,
+                    };
+                    schedules.extend(
+                        iter::repeat_with(|| SoundEffectSchedule {
+                            timestamp: *time,
+                            source: chunk.new_source(),
+                        })
+                        .take(count),
+                    );
+                }
+                // tja::NoteContent::Renda {
+                //     start_time,
+                //     end_time,
+                //     ..
+                // } => {
+                //     if *end_time <= auto_last_played || music_position < *start_time {
+                //         continue;
+                //     }
+                //     if music_position - renda_last_played > 1.0 / 20.0 {
+                //         audio_manager.add_play(&assets.chunks.sound_don)?;
+                //         renda_last_played = music_position;
+                //     }
+                // }
+                _ => {}
+            }
+        }
+        audio_manager.add_play_schedules(schedules)?;
     }
 
     'main: loop {
@@ -108,8 +152,7 @@ fn main() -> Result<(), TaikoError> {
                     Keycode::F1 => {
                         auto = !auto;
                         dbg!(auto);
-                        auto_last_played =
-                            audio_manager.music_position()?.unwrap_or(f64::NEG_INFINITY);
+                        // auto_last_played = audio_manager.music_position()?.unwrap_or(f64::NEG_INFINITY);
                     }
                     _ => {}
                 },
@@ -117,49 +160,16 @@ fn main() -> Result<(), TaikoError> {
             }
         }
 
-        if let (
-            Some(Song {
-                score: Some(score), ..
-            }),
-            Some(music_position),
-            true,
-        ) = (&song, audio_manager.music_position()?, &auto)
-        {
-            for note in score.notes.iter() {
-                match &note.content {
-                    tja::NoteContent::Normal { time, color, size } => {
-                        if !(auto_last_played < *time && *time <= music_position) {
-                            continue;
-                        }
-                        let chunk = match color {
-                            tja::NoteColor::Don => &assets.chunks.sound_don,
-                            tja::NoteColor::Ka => &assets.chunks.sound_ka,
-                        };
-                        let count = match size {
-                            tja::NoteSize::Small => 1,
-                            tja::NoteSize::Large => 2,
-                        };
-                        for _ in 0..count {
-                            audio_manager.add_play(chunk)?;
-                        }
-                    }
-                    tja::NoteContent::Renda {
-                        start_time,
-                        end_time,
-                        ..
-                    } => {
-                        if *end_time <= auto_last_played || music_position < *start_time {
-                            continue;
-                        }
-                        if music_position - renda_last_played > 1.0 / 20.0 {
-                            audio_manager.add_play(&assets.chunks.sound_don)?;
-                            renda_last_played = music_position;
-                        }
-                    }
-                }
-            }
-            auto_last_played = music_position;
-        }
+        // if let (
+        //     Some(Song {
+        //         score: Some(score), ..
+        //     }),
+        //     Some(music_position),
+        //     true,
+        // ) = (&song, audio_manager.music_position()?, &auto)
+        // {
+        //     auto_last_played = music_position;
+        // }
 
         canvas
             .copy(
