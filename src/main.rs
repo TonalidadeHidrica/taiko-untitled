@@ -1,3 +1,4 @@
+use itertools::iterate;
 use itertools::Itertools;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
@@ -118,20 +119,20 @@ fn main() -> Result<(), TaikoError> {
                         .take(count),
                     );
                 }
-                // tja::NoteContent::Renda {
-                //     start_time,
-                //     end_time,
-                //     ..
-                // } => {
-                //     if *end_time <= auto_last_played || music_position < *start_time {
-                //         continue;
-                //     }
-                //     if music_position - renda_last_played > 1.0 / 20.0 {
-                //         audio_manager.add_play(&assets.chunks.sound_don)?;
-                //         renda_last_played = music_position;
-                //     }
-                // }
-                _ => {}
+                tja::NoteContent::Renda {
+                    start_time,
+                    end_time,
+                    ..
+                } => {
+                    schedules.extend(
+                        iterate(*start_time, |&x| x + 1.0 / 20.0)
+                            .take_while(|t| t < end_time)
+                            .map(|t| SoundEffectSchedule {
+                                timestamp: t,
+                                source: assets.chunks.sound_don.new_source(),
+                            }),
+                    );
+                }
             }
         }
         audio_manager.add_play_schedules(schedules)?;
