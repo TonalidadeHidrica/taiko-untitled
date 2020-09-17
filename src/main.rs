@@ -88,8 +88,6 @@ fn main() -> Result<(), TaikoError> {
     }
 
     let mut auto = false;
-    // let mut auto_last_played = f64::NEG_INFINITY;
-    // let mut renda_last_played = f64::NEG_INFINITY;
 
     if let Some(song_wave_path) = song.as_ref().and_then(|song| song.wave.as_ref()) {
         audio_manager.load_music(song_wave_path)?;
@@ -154,24 +152,12 @@ fn main() -> Result<(), TaikoError> {
                         auto = !auto;
                         audio_manager.set_play_scheduled(auto)?;
                         dbg!(auto);
-                        // auto_last_played = audio_manager.music_position()?.unwrap_or(f64::NEG_INFINITY);
                     }
                     _ => {}
                 },
                 _ => {}
             }
         }
-
-        // if let (
-        //     Some(Song {
-        //         score: Some(score), ..
-        //     }),
-        //     Some(music_position),
-        //     true,
-        // ) = (&song, audio_manager.music_position()?, &auto)
-        // {
-        //     auto_last_played = music_position;
-        // }
 
         canvas
             .copy(

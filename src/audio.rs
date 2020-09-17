@@ -369,7 +369,6 @@ impl AudioThreadState {
 
         let ret = new_uniform_source_iterator(decoder, &self.stream_config);
         Ok(ret)
-        // Err(TaikoError { cause: TaikoErrorCause::None, message: "hoge".into() } )
     }
 }
 

@@ -4,20 +4,6 @@ use super::sample_converter::TrueSampleConverter;
 use cpal::StreamConfig;
 use rodio::{Sample, Source};
 
-// pub struct TrueUniformSourceIterator<S>
-// where
-//     S: Source,
-//     S::Item: Sample + cpal::Sample,
-// {
-//     source: S,
-// }
-//
-// impl<S> TrueUniformSourceIterator<S>
-// where
-//     S: Source,
-//     S::Item: Sample + cpal::Sample,
-// {
-
 pub type TrueUniformSourceIterator<S> =
     TrueSampleConverter<ChannelCountConverter<DataConverter<S, f32>>>;
 
@@ -40,10 +26,5 @@ where
         stream_config.channels,
         stream_config.sample_rate.0,
     );
-    // use itertools::Itertools;
-    // println!("{}", source.take(96000).enumerate().map(|(i, v)| format!("{}\t{}", i, v)).join("\n"));
     source
-    // unimplemented!()
 }
-
-// }

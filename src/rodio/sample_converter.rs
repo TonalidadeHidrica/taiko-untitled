@@ -43,56 +43,25 @@ where
     fn discard_before(&mut self, sample_index: u64) {
         let remove_len =
             (sample_index - self.input_front_sample_index) as usize * self.channels as usize;
-        // println!(
-        //     "discard_before({}) => remove_len={}",
-        //     sample_index, remove_len
-        // );
-        // println!(
-        //     "ifsi = {}, chs = {}",
-        //     self.input_front_sample_index, self.channels,
-        // );
         self.input_samples_queue
             .drain(..self.input_samples_queue.len().min(remove_len));
         self.input_front_sample_index = sample_index;
-        // println!("que_len = {}, ifsi = {}",
-        //     self.input_samples_queue.len(),
-        //     self.input_front_sample_index,
-        // );
-        // println!();
     }
 
     fn append_until(&mut self, sample_index_exclusive: u64) {
         let add_len = (sample_index_exclusive - self.input_front_sample_index) as usize
             * self.channels as usize
             - self.input_samples_queue.len();
-        // println!(
-        //     "append_until({}) => add_len={}",
-        //     sample_index_exclusive, add_len
-        // );
-        // println!(
-        //     "ifsi = {}, chs = {}, que_len = {}",
-        //     self.input_front_sample_index,
-        //     self.channels,
-        //     self.input_samples_queue.len(),
-        // );
         for _ in 0..add_len {
             self.input_samples_queue
                 .push_back(self.source.next().unwrap_or(0.0));
         }
-        // println!("que_len = {}, ifsi = {}",
-        //     self.input_samples_queue.len(),
-        //     self.input_front_sample_index,
-        // );
-        // println!();
     }
 
     #[inline]
     fn get(&self, sample_index: u64, channel_index: u16) -> f32 {
         let index_delta = (sample_index - self.input_front_sample_index) as usize;
-        let ret =
-            self.input_samples_queue[index_delta * self.channels as usize + channel_index as usize];
-        // println!("{}\t{}\t{}\t=> {}\n", sample_index, channel_index, index_delta, ret);
-        ret
+        self.input_samples_queue[index_delta * self.channels as usize + channel_index as usize]
     }
 }
 
