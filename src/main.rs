@@ -152,6 +152,7 @@ fn main() -> Result<(), TaikoError> {
                     }
                     Keycode::F1 => {
                         auto = !auto;
+                        audio_manager.set_play_scheduled(auto)?;
                         dbg!(auto);
                         // auto_last_played = audio_manager.music_position()?.unwrap_or(f64::NEG_INFINITY);
                     }

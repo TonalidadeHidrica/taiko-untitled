@@ -33,6 +33,7 @@ enum MessageToAudio {
     SetMusicVolume(f32),
     AddPlay(SoundBufferSource),
     AddSchedules(Vec<SoundEffectSchedule>),
+    SwitchScheduled(bool),
 }
 
 impl AudioManager {
@@ -120,6 +121,16 @@ impl AudioManager {
             .send(MessageToAudio::AddSchedules(schedules))
             .map_err(|_| TaikoError {
                 message: "Failed to push schedules; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn set_play_scheduled(&self, enabled: bool) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::SwitchScheduled(enabled))
+            .map_err(|_| TaikoError {
+                message: "Failed to switch scheduled play; the audio stream has been stopped"
+                    .to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -215,6 +226,7 @@ struct AudioThreadState {
     sound_effects: Vec<SoundBufferSource>,
 
     sound_effect_schedules: VecDeque<SoundEffectSchedule>,
+    scheduled_play_enabled: bool,
 
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
@@ -238,7 +250,10 @@ impl AudioThreadState {
             stream_config,
             music: None,
             sound_effects: Vec::new(),
+
             sound_effect_schedules: VecDeque::new(),
+            scheduled_play_enabled: false,
+
             receiver_to_audio,
             playing: false,
             played_sample_count: 0,
@@ -269,6 +284,9 @@ impl AudioThreadState {
                         });
                         // TODO check for time rollback
                         self.sound_effect_schedules.extend(schedules.into_iter());
+                    }
+                    MessageToAudio::SwitchScheduled(enabled) => {
+                        self.scheduled_play_enabled = enabled;
                     }
                 }
             }
@@ -304,6 +322,9 @@ impl AudioThreadState {
                         break;
                     }
                     let next = self.sound_effect_schedules.pop_front().unwrap();
+                    if !self.scheduled_play_enabled {
+                        continue;
+                    }
                     let mut source = next.source;
                     source.wait = (self.stream_config.channels as f64
                         * (next.timestamp - music_position_start)
