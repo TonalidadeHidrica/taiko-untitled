@@ -1,4 +1,5 @@
 use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
+use crate::rodio::{new_uniform_source_iterator, TrueUniformSourceIterator};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
 use itertools::Itertools;
@@ -205,10 +206,12 @@ impl Drop for AudioManager {
     }
 }
 
+type MusicSource = TrueUniformSourceIterator<Decoder<BufReader<File>>>;
+
 struct AudioThreadState {
     stream_config: StreamConfig,
 
-    music: Option<UniformSourceIterator<Decoder<BufReader<File>>, f32>>,
+    music: Option<MusicSource>,
     sound_effects: Vec<SoundBufferSource>,
 
     sound_effect_schedules: VecDeque<SoundEffectSchedule>,
@@ -333,10 +336,7 @@ impl AudioThreadState {
         }
     }
 
-    pub fn load_music(
-        &self,
-        wave: PathBuf,
-    ) -> Result<UniformSourceIterator<Decoder<BufReader<File>>, f32>, TaikoError> {
+    pub fn load_music(&self, wave: PathBuf) -> Result<MusicSource, TaikoError> {
         let file = std::fs::File::open(wave).map_err(|e| TaikoError {
             message: "Failed to open music file".to_string(),
             cause: TaikoErrorCause::AudioLoadError(e),
@@ -345,11 +345,10 @@ impl AudioThreadState {
             message: "Failed to decode music".to_string(),
             cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::DecoderError(e)),
         })?;
-        Ok(UniformSourceIterator::<_, f32>::new(
-            decoder,
-            self.stream_config.channels,
-            self.stream_config.sample_rate.0,
-        ))
+
+        let ret = new_uniform_source_iterator(decoder, &self.stream_config);
+        Ok(ret)
+        // Err(TaikoError { cause: TaikoErrorCause::None, message: "hoge".into() } )
     }
 }
 
