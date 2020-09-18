@@ -1,6 +1,6 @@
+use crate::audio::{AudioManager, SoundBuffer};
 use crate::errors::{new_sdl_error, TaikoError, TaikoErrorCause};
 use sdl2::image::LoadTexture;
-use sdl2::mixer::Chunk;
 use sdl2::render::{Texture, TextureCreator, TextureQuery};
 use sdl2::video::WindowContext;
 use std::path::Path;
@@ -23,17 +23,19 @@ pub struct Textures<'a> {
 }
 
 pub struct Chunks {
-    pub sound_don: Chunk,
-    pub sound_ka: Chunk,
+    pub sound_don: SoundBuffer,
+    pub sound_ka: SoundBuffer,
 }
 
 impl<'a> Assets<'a> {
-    pub fn new(
+    pub fn new<'b>(
         texture_creator: &'a TextureCreator<WindowContext>,
+        audio_manager: &'b AudioManager,
     ) -> Result<Assets<'a>, TaikoError> {
-        let tc = texture_creator;
         let assets_dir = Path::new("assets");
+
         let img_dir = assets_dir.join("img");
+        let tc = texture_creator;
         let textures = Textures {
             background: load_texture_and_check_size(tc, img_dir.join("game_bg.png"), (1920, 1080))?,
             note_don: load_texture_and_check_size(tc, img_dir.join("note_don.png"), (195, 195))?,
@@ -69,17 +71,21 @@ impl<'a> Assets<'a> {
                 (195, 195),
             )?,
         };
+
         let snd_dir = assets_dir.join("snd");
-        let ret = Assets {
-            textures,
-            chunks: Chunks {
-                sound_don: Chunk::from_file(snd_dir.join("dong.ogg"))
-                    .map_err(|s| new_sdl_error("Failed to load 'don' sound", s))?,
-                sound_ka: Chunk::from_file(snd_dir.join("ka.ogg"))
-                    .map_err(|s| new_sdl_error("Failed to load 'ka' sound", s))?,
-            },
+        let load_sound = |filename| {
+            SoundBuffer::load(
+                snd_dir.join(filename),
+                audio_manager.stream_config.channels,
+                audio_manager.stream_config.sample_rate,
+            )
         };
-        Ok(ret)
+        let chunks = Chunks {
+            sound_don: load_sound("dong.ogg")?,
+            sound_ka: load_sound("ka.ogg")?,
+        };
+
+        Ok(Assets { textures, chunks })
     }
 }
 

@@ -1,7 +1,10 @@
 use crate::tja::TjaError;
 use config::ConfigError;
+use cpal::{BuildStreamError, PlayStreamError, SupportedStreamConfigsError};
+use rodio::decoder::DecoderError;
 use sdl2::video::WindowBuildError;
 use sdl2::IntegerOrSdlError;
+use std::io;
 
 #[derive(Debug)]
 pub struct TaikoError {
@@ -16,8 +19,18 @@ pub enum TaikoErrorCause {
     SdlWindowError(WindowBuildError),
     SdlCanvasError(IntegerOrSdlError),
     ConfigError(ConfigError),
+    AudioLoadError(io::Error),
+    CpalOrRodioError(CpalOrRodioError),
     InvalidResourceError,
     TjaLoadError(TjaError),
+}
+
+#[derive(Debug)]
+pub enum CpalOrRodioError {
+    SupportedStreamConfigsError(SupportedStreamConfigsError),
+    BuildStreamError(BuildStreamError),
+    PlayStreamError(PlayStreamError),
+    DecoderError(DecoderError),
 }
 
 pub fn new_sdl_error<S>(message: S, sdl_message: String) -> TaikoError

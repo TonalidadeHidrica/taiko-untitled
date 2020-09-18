@@ -1,14 +1,15 @@
+use itertools::iterate;
 use itertools::Itertools;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
-use sdl2::mixer;
-use sdl2::mixer::{Channel, Music, AUDIO_S16LSB, DEFAULT_CHANNELS};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::convert::TryFrom;
 use std::ffi::c_void;
-use std::time::{Duration, Instant};
+use std::iter;
+use std::time::Duration;
 use taiko_untitled::assets::Assets;
+use taiko_untitled::audio::{AudioManager, SoundEffectSchedule};
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
@@ -56,20 +57,15 @@ fn main() -> Result<(), TaikoError> {
     }
     let texture_creator = canvas.texture_creator();
 
-    // let _audio = sdl_context
-    //     .audio()
-    //     .map_err(|s| new_sdl_error("Failed to initialize audio subsystem of SDL", s))?;
-    mixer::open_audio(44100, AUDIO_S16LSB, DEFAULT_CHANNELS, 256)
-        .map_err(|s| new_sdl_error("Failed to open audio stream", s))?;
-    mixer::allocate_channels(128);
+    let audio_manager = taiko_untitled::audio::AudioManager::new()?;
 
-    let mut assets = Assets::new(&texture_creator)?;
+    let mut assets = Assets::new(&texture_creator, &audio_manager)?;
     {
-        let volume = (128.0 * config.volume.se / 100.0) as i32;
+        let volume = config.volume.se / 100.0;
         assets.chunks.sound_don.set_volume(volume);
         assets.chunks.sound_ka.set_volume(volume);
-        let volume = (128.0 * config.volume.song / 100.0) as i32;
-        Music::set_volume(volume);
+        let volume = config.volume.song / 100.0;
+        audio_manager.set_music_volume(volume)?;
     }
 
     let song = if let [_, tja_file_name, ..] = &std::env::args().collect_vec()[..] {
@@ -80,26 +76,65 @@ fn main() -> Result<(), TaikoError> {
     } else {
         None
     };
-    let music = match song {
-        Some(Song {
-            wave: Some(ref wave),
-            ..
-        }) => Some(
-            Music::from_file(wave)
-                .map_err(|s| new_sdl_error(format!("Failed to load wave file: {:?}", wave), s))?,
-        ),
-        _ => None,
-    };
 
+    let mut event_callback_tuple = (&audio_manager, &assets);
     unsafe {
-        // variable `assets` is valid while this main function exists on the stack trace.
-        sdl2_sys::SDL_AddEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
+        // variables `audio_manager` and `assets` are valid
+        // while this main function exists on the stack.
+        sdl2_sys::SDL_AddEventWatch(
+            Some(callback),
+            &mut event_callback_tuple as *mut _ as *mut c_void,
+        );
     }
 
-    let mut playback_start = None;
     let mut auto = false;
-    let mut auto_last_played = Instant::now();
-    let mut renda_last_played = Instant::now();
+
+    if let Some(song_wave_path) = song.as_ref().and_then(|song| song.wave.as_ref()) {
+        audio_manager.load_music(song_wave_path)?;
+    }
+
+    if let Some(Song {
+        score: Some(score), ..
+    }) = &song
+    {
+        let mut schedules = Vec::new();
+        for note in &score.notes {
+            match &note.content {
+                tja::NoteContent::Normal { time, color, size } => {
+                    let chunk = match color {
+                        tja::NoteColor::Don => &assets.chunks.sound_don,
+                        tja::NoteColor::Ka => &assets.chunks.sound_ka,
+                    };
+                    let count = match size {
+                        tja::NoteSize::Small => 1,
+                        tja::NoteSize::Large => 2,
+                    };
+                    schedules.extend(
+                        iter::repeat_with(|| SoundEffectSchedule {
+                            timestamp: *time,
+                            source: chunk.new_source(),
+                        })
+                        .take(count),
+                    );
+                }
+                tja::NoteContent::Renda {
+                    start_time,
+                    end_time,
+                    ..
+                } => {
+                    schedules.extend(
+                        iterate(*start_time, |&x| x + 1.0 / 20.0)
+                            .take_while(|t| t < end_time)
+                            .map(|t| SoundEffectSchedule {
+                                timestamp: t,
+                                source: assets.chunks.sound_don.new_source(),
+                            }),
+                    );
+                }
+            }
+        }
+        audio_manager.add_play_schedules(schedules)?;
+    }
 
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -111,76 +146,17 @@ fn main() -> Result<(), TaikoError> {
                     ..
                 } => match keycode {
                     Keycode::Space => {
-                        if let Some(ref music) = music {
-                            if playback_start.is_none() {
-                                playback_start = Some(Instant::now());
-                                music
-                                    .play(0)
-                                    .map_err(|s| new_sdl_error("Failed to play wave file", s))?;
-                            }
-                        }
+                        audio_manager.play()?;
                     }
                     Keycode::F1 => {
                         auto = !auto;
+                        audio_manager.set_play_scheduled(auto)?;
                         dbg!(auto);
-                        auto_last_played = Instant::now();
                     }
                     _ => {}
                 },
                 _ => {}
             }
-        }
-
-        if let (
-            Some(Song {
-                score: Some(score), ..
-            }),
-            Some(playback_start),
-            true,
-        ) = (&song, &playback_start, &auto)
-        {
-            let now = Instant::now();
-            for note in score.notes.iter() {
-                match &note.content {
-                    tja::NoteContent::Normal { time, color, size } => {
-                        let time = *playback_start + Duration::from_secs_f64(*time);
-                        if !(auto_last_played < time && time <= now) {
-                            continue;
-                        }
-                        let chunk = match color {
-                            tja::NoteColor::Don => &assets.chunks.sound_don,
-                            tja::NoteColor::Ka => &assets.chunks.sound_ka,
-                        };
-                        let count = match size {
-                            tja::NoteSize::Small => 1,
-                            tja::NoteSize::Large => 2,
-                        };
-                        for _ in 0..count {
-                            Channel::all()
-                                .play(chunk, 0)
-                                .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
-                        }
-                    }
-                    tja::NoteContent::Renda {
-                        start_time,
-                        end_time,
-                        ..
-                    } => {
-                        let start_time = *playback_start + Duration::from_secs_f64(*start_time);
-                        let end_time = *playback_start + Duration::from_secs_f64(*end_time);
-                        if end_time <= auto_last_played || now < start_time {
-                            continue;
-                        }
-                        if now - renda_last_played > Duration::from_secs_f64(1.0 / 20.0) {
-                            Channel::all()
-                                .play(&assets.chunks.sound_don, 0)
-                                .map_err(|e| new_sdl_error("Failed to play wave file", e))?;
-                            renda_last_played = now;
-                        }
-                    }
-                }
-            }
-            auto_last_played = Instant::now();
         }
 
         canvas
@@ -195,19 +171,17 @@ fn main() -> Result<(), TaikoError> {
             Some(Song {
                 score: Some(score), ..
             }),
-            Some(playback_start),
-        ) = (&song, &playback_start)
+            Some(music_position),
+        ) = (&song, audio_manager.music_position()?)
         {
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
-            let now = Instant::now();
             let rects = score
                 .bar_lines
                 .iter()
                 .filter_map(|bar_line| {
                     if bar_line.visible {
-                        let x = get_x(playback_start, &now, bar_line.time, &bar_line.scroll_speed)
-                            as i32;
+                        let x = get_x(music_position, bar_line.time, &bar_line.scroll_speed) as i32;
                         if 0 <= x && x <= 2000 {
                             // TODO magic number depending on 1920
                             return Some(Rect::new(x + 96, 288, 3, 195));
@@ -224,7 +198,7 @@ fn main() -> Result<(), TaikoError> {
             for note in score.notes.iter().rev() {
                 match &note.content {
                     tja::NoteContent::Normal { time, color, size } => {
-                        let x = get_x(playback_start, &now, *time, &note.scroll_speed);
+                        let x = get_x(music_position, *time, &note.scroll_speed);
                         let texture = match color {
                             tja::NoteColor::Don => match size {
                                 tja::NoteSize::Small => &assets.textures.note_don,
@@ -252,9 +226,8 @@ fn main() -> Result<(), TaikoError> {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
                             }
                         };
-                        let xs =
-                            get_x(playback_start, &now, *start_time, &note.scroll_speed) as i32;
-                        let xt = get_x(playback_start, &now, *end_time, &note.scroll_speed) as i32;
+                        let xs = get_x(music_position, *start_time, &note.scroll_speed) as i32;
+                        let xt = get_x(music_position, *end_time, &note.scroll_speed) as i32;
                         canvas
                             .copy(
                                 texture_right,
@@ -279,13 +252,8 @@ fn main() -> Result<(), TaikoError> {
                         kind: tja::RendaKind::Quota { .. },
                     } => {
                         let x = get_x(
-                            playback_start,
-                            &now,
-                            num::clamp(
-                                (now - *playback_start).as_secs_f64(),
-                                *start_time,
-                                *end_time,
-                            ),
+                            music_position,
+                            num::clamp(music_position, *start_time, *end_time),
                             &note.scroll_speed,
                         ) as i32;
                         canvas
@@ -309,14 +277,17 @@ fn main() -> Result<(), TaikoError> {
     }
 
     unsafe {
-        sdl2_sys::SDL_DelEventWatch(Some(callback), &mut assets as *mut _ as *mut c_void);
+        sdl2_sys::SDL_DelEventWatch(
+            Some(callback),
+            &mut event_callback_tuple as *mut _ as *mut c_void,
+        );
     }
 
     Ok(())
 }
 
-fn get_x(playback_start: &Instant, now: &Instant, time: f64, scroll_speed: &Bpm) -> f64 {
-    let diff = time - (*now - *playback_start).as_secs_f64();
+fn get_x(music_position: f64, time: f64, scroll_speed: &Bpm) -> f64 {
+    let diff = time - music_position;
     520.0 + 1422.0 / 4.0 * diff / scroll_speed.get_beat_duration()
 }
 
@@ -338,15 +309,22 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
             _ => None,
         }
     } {
-        // `user_data` originates from `assets` variable in the `main` function stack frame,
-        // which should be valid until the hook is removed.
-        let chunks = unsafe { &(*(user_data as *mut Assets)).chunks };
-        if let Some(sound) = match keycode {
-            Keycode::X | Keycode::Slash => Some(&chunks.sound_don),
-            Keycode::Z | Keycode::Underscore => Some(&chunks.sound_ka),
-            _ => None,
-        } {
-            Channel::all().play(&sound, 0).ok();
+        // `user_data` originates from `audio_manager` and `assets` variables
+        // in the `main` function stack, which should be valid until the hook is removed.
+        let (audio_manager, assets) = unsafe {
+            // &(*(user_data as *mut Assets)).chunks
+            *(user_data as *mut (&AudioManager, &Assets))
+        };
+        match keycode {
+            Keycode::X | Keycode::Slash => {
+                // TODO send error to main thread
+                let _ = audio_manager.add_play(&assets.chunks.sound_don);
+            }
+            Keycode::Z | Keycode::Underscore => {
+                // TODO send error to main thread
+                let _ = audio_manager.add_play(&assets.chunks.sound_ka);
+            }
+            _ => {}
         }
     }
     0

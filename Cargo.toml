@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sdl2 = { version = "0.34.2", features = ["image", "mixer"] }
+sdl2 = { version = "0.34.2", features = ["image"] }
 serde = { version = "1.0.115", features = ["derive"] }
 config = "0.10.1"
 encoding_rs = "0.8.24"
@@ -15,3 +15,6 @@ chardetng = "0.1.9"
 itertools = "0.9.0"
 sdl2-sys = "0.34.2"
 num = "0.3.0"
+cpal = "0.12.1"
+rodio = "0.11.0"
+retain_mut = "0.1.1"
