@@ -14,6 +14,7 @@ use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
 };
+use taiko_untitled::game::GameState;
 use taiko_untitled::tja;
 use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
 
@@ -57,6 +58,10 @@ fn main() -> Result<(), TaikoError> {
     }
     let texture_creator = canvas.texture_creator();
 
+    let mut timer_subsystem = sdl_context
+        .timer()
+        .map_err(|s| new_sdl_error("Failed to initialize timer subsystem of SDL", s))?;
+
     let audio_manager = taiko_untitled::audio::AudioManager::new()?;
 
     let mut assets = Assets::new(&texture_creator, &audio_manager)?;
@@ -87,7 +92,10 @@ fn main() -> Result<(), TaikoError> {
         );
     }
 
-    let mut auto = false;
+    let mut game_state = song
+        .as_ref()
+        .and_then(|song| (&song.score).as_ref())
+        .map(|score| GameState::new(&score));
 
     if let Some(song_wave_path) = song.as_ref().and_then(|song| song.wave.as_ref()) {
         audio_manager.load_music(song_wave_path)?;
@@ -137,21 +145,41 @@ fn main() -> Result<(), TaikoError> {
     }
 
     'main: loop {
+        let music_position = audio_manager.music_position()?;
+        let sdl_timestamp = timer_subsystem.ticks();
+
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'main,
                 Event::KeyDown {
                     repeat: false,
                     keycode: Some(keycode),
+                    timestamp,
                     ..
                 } => match keycode {
+                    Keycode::Z | Keycode::X | Keycode::Slash | Keycode::Underscore => {
+                        let color = match keycode {
+                            Keycode::X | Keycode::Slash => tja::NoteColor::Don,
+                            Keycode::Z | Keycode::Underscore => tja::NoteColor::Ka,
+                            _ => unreachable!(),
+                        };
+                        if let (Some(game_state), Some(music_position)) =
+                            (game_state.as_mut(), music_position)
+                        {
+                            game_state.hit(
+                                color,
+                                music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
+                            );
+                        }
+                    }
                     Keycode::Space => {
                         audio_manager.play()?;
                     }
                     Keycode::F1 => {
-                        auto = !auto;
-                        audio_manager.set_play_scheduled(auto)?;
-                        dbg!(auto);
+                        if let Some(ref mut game_state) = game_state {
+                            let auto = game_state.switch_auto();
+                            audio_manager.set_play_scheduled(auto)?;
+                        }
                     }
                     _ => {}
                 },
@@ -171,8 +199,9 @@ fn main() -> Result<(), TaikoError> {
             Some(Song {
                 score: Some(score), ..
             }),
+            Some(game_state),
             Some(music_position),
-        ) = (&song, audio_manager.music_position()?)
+        ) = (&song, game_state.as_ref(), audio_manager.music_position()?)
         {
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
@@ -195,7 +224,12 @@ fn main() -> Result<(), TaikoError> {
                 .fill_rects(&rects[..])
                 .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
 
-            for note in score.notes.iter().rev() {
+            for note in game_state
+                .notes()
+                .iter()
+                .filter_map(|note| if note.remains { Some(&note.note) } else { None })
+                .rev()
+            {
                 match &note.content {
                     tja::NoteContent::Normal { time, color, size } => {
                         let x = get_x(music_position, *time, &note.scroll_speed);

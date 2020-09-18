@@ -51,13 +51,13 @@ pub struct Score {
     pub bar_lines: Vec<BarLine>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Note {
     pub scroll_speed: Bpm,
     pub content: NoteContent,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum NoteContent {
     Normal {
         color: NoteColor,
@@ -81,25 +81,25 @@ impl NoteContent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum NoteColor {
     Don,
     Ka,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum NoteSize {
     Small,
     Large,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum RendaKind {
     Unlimited { size: NoteSize },
     Quota { kind: QuotaRendaKind, quota: u64 },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum QuotaRendaKind {
     Balloon,
     Potato,
@@ -203,7 +203,7 @@ impl Measure {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Bpm(f64);
 
 impl Bpm {
