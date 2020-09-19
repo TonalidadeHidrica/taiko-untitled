@@ -4,6 +4,7 @@ use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
+use sdl2::render::WindowCanvas;
 use std::convert::TryFrom;
 use std::ffi::c_void;
 use std::iter;
@@ -190,6 +191,8 @@ fn main() -> Result<(), TaikoError> {
             }
         }
 
+        canvas.set_draw_color(Color::RGBA(0, 0, 0, 0));
+        canvas.clear();
         canvas
             .copy(
                 &assets.textures.background,
@@ -202,12 +205,14 @@ fn main() -> Result<(), TaikoError> {
             Some(Song {
                 score: Some(score), ..
             }),
-            Some(game_state),
+            Some(ref mut game_state),
             Some(music_position),
-        ) = (&song, game_state.as_ref(), audio_manager.music_position()?)
+        ) = (&song, game_state.as_mut(), audio_manager.music_position()?)
         {
+            // draw score
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
+            // draw measure lines
             let rects = score
                 .bar_lines
                 .iter()
@@ -227,6 +232,7 @@ fn main() -> Result<(), TaikoError> {
                 .fill_rects(&rects[..])
                 .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
 
+            // draw notes
             for note in game_state
                 .notes()
                 .iter()
@@ -234,24 +240,9 @@ fn main() -> Result<(), TaikoError> {
                 .rev()
             {
                 match &note.content {
-                    tja::NoteContent::Normal(tja::SingleNoteContent {
-                        time,
-                        kind: tja::SingleNoteKind { color, size },
-                    }) => {
+                    tja::NoteContent::Normal(tja::SingleNoteContent { time, kind }) => {
                         let x = get_x(music_position, *time, &note.scroll_speed);
-                        let texture = match color {
-                            tja::NoteColor::Don => match size {
-                                tja::NoteSize::Small => &assets.textures.note_don,
-                                tja::NoteSize::Large => &assets.textures.note_don_large,
-                            },
-                            tja::NoteColor::Ka => match size {
-                                tja::NoteSize::Small => &assets.textures.note_ka,
-                                tja::NoteSize::Large => &assets.textures.note_ka_large,
-                            },
-                        };
-                        canvas
-                            .copy(texture, None, Rect::new(x as i32, 288, 195, 195))
-                            .map_err(|e| new_sdl_error("Failed to draw a note", e))?;
+                        draw_note(&mut canvas, &assets, kind, x as i32, 288)?;
                     }
                     tja::NoteContent::Renda(tja::RendaContent {
                         start_time,
@@ -308,6 +299,19 @@ fn main() -> Result<(), TaikoError> {
             }
 
             canvas.set_clip_rect(None);
+
+            // draw flying notes
+            for note in game_state.flying_notes(|note| note.time <= music_position - 0.5) {
+                // ends in 0.5 seconds
+                let t = (music_position - note.time) * 60.0;
+                if t >= 0.5 {
+                    // after 0.5 frames
+                    let x = 521.428 + 19.4211 * t + 1.75748 * t * t - 0.035165 * t * t * t;
+                    let y = 288.4 - 44.303 * t + 0.703272 * t * t + 0.0368848 * t * t * t
+                        - 0.000542067 * t * t * t * t;
+                    draw_note(&mut canvas, &assets, &note.kind, x as i32, y as i32)?;
+                }
+            }
         }
 
         canvas.present();
@@ -329,6 +333,28 @@ fn main() -> Result<(), TaikoError> {
 fn get_x(music_position: f64, time: f64, scroll_speed: &Bpm) -> f64 {
     let diff = time - music_position;
     520.0 + 1422.0 / 4.0 * diff / scroll_speed.get_beat_duration()
+}
+
+fn draw_note(
+    canvas: &mut WindowCanvas,
+    assets: &Assets,
+    kind: &tja::SingleNoteKind,
+    x: i32,
+    y: i32,
+) -> Result<(), TaikoError> {
+    let texture = match kind.color {
+        tja::NoteColor::Don => match kind.size {
+            tja::NoteSize::Small => &assets.textures.note_don,
+            tja::NoteSize::Large => &assets.textures.note_don_large,
+        },
+        tja::NoteColor::Ka => match kind.size {
+            tja::NoteSize::Small => &assets.textures.note_ka,
+            tja::NoteSize::Large => &assets.textures.note_ka_large,
+        },
+    };
+    canvas
+        .copy(texture, None, Rect::new(x, y, 195, 195))
+        .map_err(|e| new_sdl_error("Failed to draw a note", e))
 }
 
 extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) -> i32 {
