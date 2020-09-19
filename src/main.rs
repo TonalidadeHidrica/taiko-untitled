@@ -10,12 +10,12 @@ use std::ffi::c_void;
 use std::iter;
 use std::time::Duration;
 use taiko_untitled::assets::Assets;
-use taiko_untitled::audio::{AudioManager, SoundEffectSchedule};
+use taiko_untitled::audio::{AudioManager, SoundEffectSchedule, SoundBuffer};
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
 };
-use taiko_untitled::game::GameState;
+use taiko_untitled::game::{GameState, Judge};
 use taiko_untitled::tja;
 use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
 
@@ -83,7 +83,11 @@ fn main() -> Result<(), TaikoError> {
         None
     };
 
-    let mut event_callback_tuple = (&audio_manager, &assets);
+    let mut event_callback_tuple = (
+        &audio_manager,
+        &assets.chunks.sound_don.clone(),
+        &assets.chunks.sound_ka.clone(),
+    );
     unsafe {
         // variables `audio_manager` and `assets` are valid
         // while this main function exists on the stack.
@@ -301,7 +305,10 @@ fn main() -> Result<(), TaikoError> {
             canvas.set_clip_rect(None);
 
             // draw flying notes
-            for note in game_state.flying_notes(|note| note.time <= music_position - 0.5) {
+            for note in game_state
+                .flying_notes(|note| note.time <= music_position - 0.5)
+                .rev()
+            {
                 // ends in 0.5 seconds
                 let t = (music_position - note.time) * 60.0;
                 if t >= 0.5 {
@@ -311,6 +318,28 @@ fn main() -> Result<(), TaikoError> {
                         - 0.000542067 * t * t * t * t;
                     draw_note(&mut canvas, &assets, &note.kind, x as i32, y as i32)?;
                 }
+            }
+
+            for judge in game_state
+                .judge_strs(|judge| (music_position - judge.time) * 60.0 >= 18.0)
+                .rev()
+            {
+                // (552, 226)
+                let (y, a) = match (music_position - judge.time) * 60.0 {
+                    t if t < 1.0 => (226.0 - 20.0 * t, t),
+                    t if t < 6.0 => (206.0 + 20.0 * (t - 1.0) / 5.0, 1.0),
+                    t if t < 14.0 => (226.0, 1.0),
+                    t => (226.0, (18.0 - t) / 4.0),
+                };
+                let texture = match judge.judge {
+                    Judge::Good => &mut assets.textures.judge_text_good,
+                    Judge::Ok => &mut assets.textures.judge_text_ok,
+                    Judge::Bad => &mut assets.textures.judge_text_bad,
+                };
+                texture.set_alpha_mod((a * 255.0) as u8);
+                canvas
+                    .copy(texture, None, Some(Rect::new(552, y as i32, 135, 90)))
+                    .map_err(|e| new_sdl_error("Failed to draw judge str", e))?;
             }
         }
 
@@ -377,18 +406,18 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
     } {
         // `user_data` originates from `audio_manager` and `assets` variables
         // in the `main` function stack, which should be valid until the hook is removed.
-        let (audio_manager, assets) = unsafe {
+        let (audio_manager, sound_don, sound_ka) = unsafe {
             // &(*(user_data as *mut Assets)).chunks
-            *(user_data as *mut (&AudioManager, &Assets))
+            *(user_data as *mut (&AudioManager, &SoundBuffer, &SoundBuffer))
         };
         match keycode {
             Keycode::X | Keycode::Slash => {
                 // TODO send error to main thread
-                let _ = audio_manager.add_play(&assets.chunks.sound_don);
+                let _ = audio_manager.add_play(sound_don);
             }
             Keycode::Z | Keycode::Underscore => {
                 // TODO send error to main thread
-                let _ = audio_manager.add_play(&assets.chunks.sound_ka);
+                let _ = audio_manager.add_play(sound_ka);
             }
             _ => {}
         }

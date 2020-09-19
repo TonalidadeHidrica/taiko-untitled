@@ -13,6 +13,7 @@ pub struct GameState<'a> {
 
     // maybe this should not be here
     flying_notes: VecDeque<FlyingNote>,
+    judge_strs: VecDeque<JudgeStr>,
 }
 
 pub struct Note {
@@ -34,6 +35,17 @@ pub struct FlyingNote {
     pub kind: SingleNoteKind,
 }
 
+pub struct JudgeStr {
+    pub time: f64,
+    pub judge: Judge,
+}
+
+pub enum Judge {
+    Good,
+    Ok,
+    Bad,
+}
+
 impl<'a> GameState<'a> {
     pub fn new(score: &'a Score) -> Self {
         GameState {
@@ -42,6 +54,7 @@ impl<'a> GameState<'a> {
 
             auto: false,
             flying_notes: Default::default(),
+            judge_strs: Default::default(),
         }
     }
 
@@ -60,7 +73,7 @@ impl<'a> GameState<'a> {
     }
 
     pub fn hit(&mut self, color: NoteColor, time: f64) {
-        if let Some((remains, kind)) = self
+        if let Some((remains, kind, diff)) = self
             .notes
             .iter_mut()
             .filter_map(|note| match note {
@@ -77,9 +90,10 @@ impl<'a> GameState<'a> {
                             ..
                         },
                 } if kind.color == color => {
-                    if (time - *note_time).abs() <= 0.150 / 2.0 {
+                    let diff = (time - *note_time).abs();
+                    if diff <= 0.150 / 2.0 {
                         // let kind = kind.clone();
-                        Some((&mut note.remains, &*kind))
+                        Some((&mut note.remains, &*kind, diff))
                     } else {
                         None
                     }
@@ -93,15 +107,40 @@ impl<'a> GameState<'a> {
                 time,
                 kind: kind.clone(),
             });
+            self.judge_strs.push_back(JudgeStr {
+                time,
+                judge: if diff <= 0.050 / 2.0 {
+                    Judge::Good
+                } else {
+                    Judge::Ok
+                },
+            });
         }
     }
 
-    pub fn flying_notes<F>(&mut self, filter_out: F) -> impl Iterator<Item = &FlyingNote>
+    pub fn flying_notes<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &FlyingNote>
     where
         F: FnMut(&&FlyingNote) -> bool,
     {
-        let count = self.flying_notes.iter().take_while(filter_out).count();
-        self.flying_notes.drain(..count);
-        self.flying_notes.iter()
+        filter_out_and_iter(&mut self.flying_notes, filter_out)
     }
+
+    pub fn judge_strs<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &JudgeStr>
+    where
+        F: FnMut(&&JudgeStr) -> bool,
+    {
+        filter_out_and_iter(&mut self.judge_strs, filter_out)
+    }
+}
+
+fn filter_out_and_iter<T, F>(
+    vec: &mut VecDeque<T>,
+    filter_out: F,
+) -> impl DoubleEndedIterator<Item = &T>
+where
+    F: FnMut(&&T) -> bool,
+{
+    let count = vec.iter().take_while(filter_out).count();
+    vec.drain(..count);
+    vec.iter()
 }

@@ -20,6 +20,9 @@ pub struct Textures<'a> {
     pub renda_right: Texture<'a>,
     pub renda_large_left: Texture<'a>,
     pub renda_large_right: Texture<'a>,
+    pub judge_text_good: Texture<'a>,
+    pub judge_text_ok: Texture<'a>,
+    pub judge_text_bad: Texture<'a>,
 }
 
 pub struct Chunks {
@@ -69,6 +72,21 @@ impl<'a> Assets<'a> {
                 tc,
                 img_dir.join("renda_large_right.png"),
                 (195, 195),
+            )?,
+            judge_text_good: load_texture_and_check_size(
+                tc,
+                img_dir.join("judge_text_good.png"),
+                (135, 90),
+            )?,
+            judge_text_ok: load_texture_and_check_size(
+                tc,
+                img_dir.join("judge_text_ok.png"),
+                (135, 90),
+            )?,
+            judge_text_bad: load_texture_and_check_size(
+                tc,
+                img_dir.join("judge_text_bad.png"),
+                (135, 90),
             )?,
         };
 
