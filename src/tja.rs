@@ -59,21 +59,32 @@ pub struct Note {
 
 #[derive(Clone, Debug)]
 pub enum NoteContent {
-    Normal {
-        color: NoteColor,
-        size: NoteSize,
-        time: f64,
-    },
-    Renda {
-        kind: RendaKind,
-        start_time: f64,
-        end_time: f64,
-    },
+    Normal(SingleNoteContent),
+    Renda(RendaContent),
 }
 
-impl NoteContent {
-    fn renda(time: f64, kind: RendaKind) -> Self {
-        Self::Renda {
+#[derive(Clone, Debug)]
+pub struct SingleNoteContent {
+    pub kind: SingleNoteKind,
+    pub time: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct SingleNoteKind {
+    pub color: NoteColor,
+    pub size: NoteSize,
+}
+
+#[derive(Clone, Debug)]
+pub struct RendaContent {
+    pub kind: RendaKind,
+    pub start_time: f64,
+    pub end_time: f64,
+}
+
+impl RendaContent {
+    fn new(time: f64, kind: RendaKind) -> Self {
+        RendaContent {
             kind,
             start_time: time,
             end_time: time,
@@ -184,7 +195,7 @@ struct SongContext {
     hs: f64,
     bar_line: bool,
     gogo: bool,
-    renda: Option<Note>,
+    renda: Option<(Bpm, RendaContent)>,
     balloons: VecDeque<u64>,
 }
 
@@ -269,7 +280,7 @@ impl SongContext {
                             }));
                             None
                         }
-                        '8' => Self::terminate_renda(self.time, &mut self.renda)?,
+                        '8' => Self::terminate_renda(self.time, &mut self.renda),
                         '9' => {
                             let quota = self.balloons.pop_front().unwrap_or(5);
                             self.renda = Some(self.renda(RendaKind::Quota {
@@ -318,36 +329,35 @@ impl SongContext {
         }
     }
     fn note(&self, ka: bool, large: bool) -> Note {
-        self.with_scroll_speed(NoteContent::Normal {
-            color: match ka {
-                false => NoteColor::Don,
-                true => NoteColor::Ka,
-            },
-            size: match large {
-                false => NoteSize::Small,
-                true => NoteSize::Large,
+        self.with_scroll_speed(NoteContent::Normal(SingleNoteContent {
+            kind: SingleNoteKind {
+                color: match ka {
+                    false => NoteColor::Don,
+                    true => NoteColor::Ka,
+                },
+                size: match large {
+                    false => NoteSize::Small,
+                    true => NoteSize::Large,
+                },
             },
             time: self.time,
-        })
+        }))
     }
-    fn renda(&self, renda_kind: RendaKind) -> Note {
-        self.with_scroll_speed(NoteContent::renda(self.time, renda_kind))
+    fn renda(&self, renda_kind: RendaKind) -> (Bpm, RendaContent) {
+        (
+            self.scroll_speed(),
+            RendaContent::new(self.time, renda_kind),
+        )
     }
-    fn terminate_renda(time: f64, renda: &mut Option<Note>) -> Result<Option<Note>, TjaError> {
-        if let Some(mut note) = renda.take() {
-            if let NoteContent::Renda {
-                ref mut end_time, ..
-            } = note.content
-            {
-                *end_time = time;
-                Ok(Some(note))
-            } else {
-                Err(TjaError::Unreachable(
-                    "Buffer should always have renda in it",
-                ))
-            }
+    fn terminate_renda(time: f64, renda: &mut Option<(Bpm, RendaContent)>) -> Option<Note> {
+        if let Some((scroll_speed, mut content)) = renda.take() {
+            content.end_time = time;
+            Some(Note {
+                scroll_speed,
+                content: NoteContent::Renda(content),
+            })
         } else {
-            Ok(None)
+            None
         }
     }
 }

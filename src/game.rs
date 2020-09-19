@@ -1,4 +1,6 @@
-use crate::tja::{Note as RawNote, NoteColor, NoteContent as NC, Score};
+use crate::tja::{
+    Note as RawNote, NoteColor, NoteContent as NC, Score, SingleNoteContent, SingleNoteKind,
+};
 use itertools::Itertools;
 
 pub struct GameState<'a> {
@@ -57,11 +59,14 @@ impl<'a> GameState<'a> {
                     note:
                         RawNote {
                             content:
-                                NC::Normal {
-                                    color: note_color,
+                                NC::Normal(SingleNoteContent {
+                                    kind:
+                                        SingleNoteKind {
+                                            color: note_color, ..
+                                        },
                                     time: note_time,
                                     ..
-                                },
+                                }),
                             ..
                         },
                 } if *note_color == color => (time - *note_time).abs() <= 0.150 / 2.0,

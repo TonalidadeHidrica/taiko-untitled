@@ -108,7 +108,10 @@ fn main() -> Result<(), TaikoError> {
         let mut schedules = Vec::new();
         for note in &score.notes {
             match &note.content {
-                tja::NoteContent::Normal { time, color, size } => {
+                tja::NoteContent::Normal(tja::SingleNoteContent {
+                    time,
+                    kind: tja::SingleNoteKind { color, size },
+                }) => {
                     let chunk = match color {
                         tja::NoteColor::Don => &assets.chunks.sound_don,
                         tja::NoteColor::Ka => &assets.chunks.sound_ka,
@@ -125,11 +128,11 @@ fn main() -> Result<(), TaikoError> {
                         .take(count),
                     );
                 }
-                tja::NoteContent::Renda {
+                tja::NoteContent::Renda(tja::RendaContent {
                     start_time,
                     end_time,
                     ..
-                } => {
+                }) => {
                     schedules.extend(
                         iterate(*start_time, |&x| x + 1.0 / 20.0)
                             .take_while(|t| t < end_time)
@@ -231,7 +234,10 @@ fn main() -> Result<(), TaikoError> {
                 .rev()
             {
                 match &note.content {
-                    tja::NoteContent::Normal { time, color, size } => {
+                    tja::NoteContent::Normal(tja::SingleNoteContent {
+                        time,
+                        kind: tja::SingleNoteKind { color, size },
+                    }) => {
                         let x = get_x(music_position, *time, &note.scroll_speed);
                         let texture = match color {
                             tja::NoteColor::Don => match size {
@@ -247,11 +253,11 @@ fn main() -> Result<(), TaikoError> {
                             .copy(texture, None, Rect::new(x as i32, 288, 195, 195))
                             .map_err(|e| new_sdl_error("Failed to draw a note", e))?;
                     }
-                    tja::NoteContent::Renda {
+                    tja::NoteContent::Renda(tja::RendaContent {
                         start_time,
                         end_time,
                         kind: tja::RendaKind::Unlimited { size },
-                    } => {
+                    }) => {
                         let (texture_left, texture_right) = match size {
                             tja::NoteSize::Small => {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
@@ -280,11 +286,11 @@ fn main() -> Result<(), TaikoError> {
                             .copy(texture_left, None, Rect::new(xs, 288, 195, 195))
                             .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
                     }
-                    tja::NoteContent::Renda {
+                    tja::NoteContent::Renda(tja::RendaContent {
                         start_time,
                         end_time,
                         kind: tja::RendaKind::Quota { .. },
-                    } => {
+                    }) => {
                         let x = get_x(
                             music_position,
                             num::clamp(music_position, *start_time, *end_time),
