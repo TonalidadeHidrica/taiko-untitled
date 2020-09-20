@@ -252,7 +252,7 @@ fn main() -> Result<(), TaikoError> {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
                             }
                             NoteSize::Large => {
-                                (&assets.textures.renda_left, &assets.textures.renda_right)
+                                (&assets.textures.renda_large_left, &assets.textures.renda_large_right)
                             }
                         };
                         let xs = get_x(music_position, note.time, &note.scroll_speed) as i32;
