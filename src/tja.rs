@@ -1,3 +1,5 @@
+use crate::structs::just::*;
+use crate::structs::*;
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use itertools::Itertools;
@@ -49,71 +51,6 @@ pub struct Song {
 pub struct Score {
     pub notes: Vec<Note>,
     pub bar_lines: Vec<BarLine>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Note {
-    pub scroll_speed: Bpm,
-    pub content: NoteContent,
-}
-
-#[derive(Clone, Debug)]
-pub enum NoteContent {
-    Normal(SingleNoteContent),
-    Renda(RendaContent),
-}
-
-#[derive(Clone, Debug)]
-pub struct SingleNoteContent {
-    pub kind: SingleNoteKind,
-    pub time: f64,
-}
-
-#[derive(Clone, Debug)]
-pub struct SingleNoteKind {
-    pub color: NoteColor,
-    pub size: NoteSize,
-}
-
-#[derive(Clone, Debug)]
-pub struct RendaContent {
-    pub kind: RendaKind,
-    pub start_time: f64,
-    pub end_time: f64,
-}
-
-impl RendaContent {
-    fn new(time: f64, kind: RendaKind) -> Self {
-        RendaContent {
-            kind,
-            start_time: time,
-            end_time: time,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum NoteColor {
-    Don,
-    Ka,
-}
-
-#[derive(Clone, Debug)]
-pub enum NoteSize {
-    Small,
-    Large,
-}
-
-#[derive(Clone, Debug)]
-pub enum RendaKind {
-    Unlimited { size: NoteSize },
-    Quota { kind: QuotaRendaKind, quota: u64 },
-}
-
-#[derive(Clone, Debug)]
-pub enum QuotaRendaKind {
-    Balloon,
-    Potato,
 }
 
 #[derive(Debug)]
@@ -185,6 +122,9 @@ pub fn load_tja_from_file<P: AsRef<Path>>(path: P) -> Result<Song, TjaError> {
 }
 
 #[derive(Debug)]
+struct RendaBuffer(Bpm, f64, RendaContent);
+
+#[derive(Debug)]
 struct SongContext {
     player: Player,
     score: Score,
@@ -195,32 +135,8 @@ struct SongContext {
     hs: f64,
     bar_line: bool,
     gogo: bool,
-    renda: Option<(Bpm, RendaContent)>,
+    renda: Option<RendaBuffer>,
     balloons: VecDeque<u64>,
-}
-
-#[derive(Debug)]
-struct Measure(f64, f64);
-
-impl Default for Measure {
-    fn default() -> Self {
-        Measure(4.0, 4.0)
-    }
-}
-
-impl Measure {
-    pub fn get_beat_count(&self) -> f64 {
-        self.0 / self.1 * 4.0
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Bpm(f64);
-
-impl Bpm {
-    pub fn get_beat_duration(&self) -> f64 {
-        60.0 / self.0
-    }
 }
 
 impl SongContext {
@@ -261,32 +177,36 @@ impl SongContext {
                         '3' => Some(self.note(false, true)),
                         '4' => Some(self.note(true, true)),
                         '5' => {
-                            self.renda = Some(self.renda(RendaKind::Unlimited {
+                            self.renda = Some(self.renda(RendaKind::Unlimited(UnlimitedRenda {
                                 size: NoteSize::Small,
-                            }));
+                                info: (),
+                            })));
                             None
                         }
                         '6' => {
-                            self.renda = Some(self.renda(RendaKind::Unlimited {
+                            self.renda = Some(self.renda(RendaKind::Unlimited(UnlimitedRenda {
                                 size: NoteSize::Large,
-                            }));
+                                info: (),
+                            })));
                             None
                         }
                         '7' => {
                             let quota = self.balloons.pop_front().unwrap_or(5);
-                            self.renda = Some(self.renda(RendaKind::Quota {
+                            self.renda = Some(self.renda(RendaKind::Quota(QuotaRenda {
                                 kind: QuotaRendaKind::Balloon,
                                 quota,
-                            }));
+                                info: (),
+                            })));
                             None
                         }
                         '8' => Self::terminate_renda(self.time, &mut self.renda),
                         '9' => {
                             let quota = self.balloons.pop_front().unwrap_or(5);
-                            self.renda = Some(self.renda(RendaKind::Quota {
+                            self.renda = Some(self.renda(RendaKind::Quota(QuotaRenda {
                                 kind: QuotaRendaKind::Potato,
                                 quota,
-                            }));
+                                info: (),
+                            })));
                             None
                         }
                         _ => {
@@ -324,12 +244,14 @@ impl SongContext {
     }
     fn with_scroll_speed(&self, note_content: NoteContent) -> Note {
         Note {
+            time: self.time,
             scroll_speed: self.scroll_speed(),
             content: note_content,
+            info: (),
         }
     }
     fn note(&self, ka: bool, large: bool) -> Note {
-        self.with_scroll_speed(NoteContent::Normal(SingleNoteContent {
+        self.with_scroll_speed(NoteContent::Single(SingleNote {
             kind: SingleNoteKind {
                 color: match ka {
                     false => NoteColor::Don,
@@ -340,21 +262,28 @@ impl SongContext {
                     true => NoteSize::Large,
                 },
             },
-            time: self.time,
+            info: (),
         }))
     }
-    fn renda(&self, renda_kind: RendaKind) -> (Bpm, RendaContent) {
-        (
+    fn renda(&self, kind: RendaKind) -> RendaBuffer {
+        RendaBuffer(
             self.scroll_speed(),
-            RendaContent::new(self.time, renda_kind),
+            self.time,
+            RendaContent {
+                end_time: self.time,
+                kind,
+                info: (),
+            },
         )
     }
-    fn terminate_renda(time: f64, renda: &mut Option<(Bpm, RendaContent)>) -> Option<Note> {
-        if let Some((scroll_speed, mut content)) = renda.take() {
-            content.end_time = time;
+    fn terminate_renda(end_time: f64, renda: &mut Option<RendaBuffer>) -> Option<Note> {
+        if let Some(RendaBuffer(scroll_speed, time, mut content)) = renda.take() {
+            content.end_time = end_time;
             Some(Note {
                 scroll_speed,
+                time,
                 content: NoteContent::Renda(content),
+                info: (),
             })
         } else {
             None

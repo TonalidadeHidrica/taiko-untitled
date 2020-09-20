@@ -10,14 +10,17 @@ use std::ffi::c_void;
 use std::iter;
 use std::time::Duration;
 use taiko_untitled::assets::Assets;
-use taiko_untitled::audio::{AudioManager, SoundEffectSchedule, SoundBuffer};
+use taiko_untitled::audio::{AudioManager, SoundBuffer, SoundEffectSchedule};
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
 };
 use taiko_untitled::game::{GameState, Judge};
-use taiko_untitled::tja;
-use taiko_untitled::tja::{load_tja_from_file, Bpm, Song};
+use taiko_untitled::structs::{
+    typed::{NoteContent, RendaContent, RendaKind},
+    Bpm, NoteColor, NoteSize, SingleNoteKind,
+};
+use taiko_untitled::tja::{load_tja_from_file, Song};
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -113,33 +116,26 @@ fn main() -> Result<(), TaikoError> {
         let mut schedules = Vec::new();
         for note in &score.notes {
             match &note.content {
-                tja::NoteContent::Normal(tja::SingleNoteContent {
-                    time,
-                    kind: tja::SingleNoteKind { color, size },
-                }) => {
-                    let chunk = match color {
-                        tja::NoteColor::Don => &assets.chunks.sound_don,
-                        tja::NoteColor::Ka => &assets.chunks.sound_ka,
+                NoteContent::Single(single_note) => {
+                    let chunk = match single_note.kind.color {
+                        NoteColor::Don => &assets.chunks.sound_don,
+                        NoteColor::Ka => &assets.chunks.sound_ka,
                     };
-                    let count = match size {
-                        tja::NoteSize::Small => 1,
-                        tja::NoteSize::Large => 2,
+                    let count = match single_note.kind.size {
+                        NoteSize::Small => 1,
+                        NoteSize::Large => 2,
                     };
                     schedules.extend(
                         iter::repeat_with(|| SoundEffectSchedule {
-                            timestamp: *time,
+                            timestamp: note.time,
                             source: chunk.new_source(),
                         })
                         .take(count),
                     );
                 }
-                tja::NoteContent::Renda(tja::RendaContent {
-                    start_time,
-                    end_time,
-                    ..
-                }) => {
+                NoteContent::Renda(RendaContent { end_time, .. }) => {
                     schedules.extend(
-                        iterate(*start_time, |&x| x + 1.0 / 20.0)
+                        iterate(note.time, |&x| x + 1.0 / 20.0)
                             .take_while(|t| t < end_time)
                             .map(|t| SoundEffectSchedule {
                                 timestamp: t,
@@ -167,8 +163,8 @@ fn main() -> Result<(), TaikoError> {
                 } => match keycode {
                     Keycode::Z | Keycode::X | Keycode::Slash | Keycode::Underscore => {
                         let color = match keycode {
-                            Keycode::X | Keycode::Slash => tja::NoteColor::Don,
-                            Keycode::Z | Keycode::Underscore => tja::NoteColor::Ka,
+                            Keycode::X | Keycode::Slash => NoteColor::Don,
+                            Keycode::Z | Keycode::Underscore => NoteColor::Ka,
                             _ => unreachable!(),
                         };
                         if let (Some(game_state), Some(music_position)) =
@@ -237,31 +233,29 @@ fn main() -> Result<(), TaikoError> {
                 .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
 
             // draw notes
-            for note in game_state
-                .notes()
-                .iter()
-                .filter_map(|note| if note.remains { Some(&note.note) } else { None })
-                .rev()
-            {
+            for note in game_state.notes().iter().rev() {
                 match &note.content {
-                    tja::NoteContent::Normal(tja::SingleNoteContent { time, kind }) => {
-                        let x = get_x(music_position, *time, &note.scroll_speed);
-                        draw_note(&mut canvas, &assets, kind, x as i32, 288)?;
+                    NoteContent::Single(single_note) => {
+                        if single_note.info.hit {
+                            continue;
+                        }
+                        let x = get_x(music_position, note.time, &note.scroll_speed);
+                        draw_note(&mut canvas, &assets, &single_note.kind, x as i32, 288)?;
                     }
-                    tja::NoteContent::Renda(tja::RendaContent {
-                        start_time,
+                    NoteContent::Renda(RendaContent {
                         end_time,
-                        kind: tja::RendaKind::Unlimited { size },
+                        kind: RendaKind::Unlimited(renda),
+                        ..
                     }) => {
-                        let (texture_left, texture_right) = match size {
-                            tja::NoteSize::Small => {
+                        let (texture_left, texture_right) = match renda.size {
+                            NoteSize::Small => {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
                             }
-                            tja::NoteSize::Large => {
+                            NoteSize::Large => {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
                             }
                         };
-                        let xs = get_x(music_position, *start_time, &note.scroll_speed) as i32;
+                        let xs = get_x(music_position, note.time, &note.scroll_speed) as i32;
                         let xt = get_x(music_position, *end_time, &note.scroll_speed) as i32;
                         canvas
                             .copy(
@@ -281,14 +275,17 @@ fn main() -> Result<(), TaikoError> {
                             .copy(texture_left, None, Rect::new(xs, 288, 195, 195))
                             .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
                     }
-                    tja::NoteContent::Renda(tja::RendaContent {
-                        start_time,
+                    NoteContent::Renda(RendaContent {
                         end_time,
-                        kind: tja::RendaKind::Quota { .. },
+                        kind: RendaKind::Quota(renda),
+                        ..
                     }) => {
+                        if renda.info.finished {
+                            continue;
+                        }
                         let x = get_x(
                             music_position,
-                            num::clamp(music_position, *start_time, *end_time),
+                            num::clamp(music_position, note.time, *end_time),
                             &note.scroll_speed,
                         ) as i32;
                         canvas
@@ -367,18 +364,18 @@ fn get_x(music_position: f64, time: f64, scroll_speed: &Bpm) -> f64 {
 fn draw_note(
     canvas: &mut WindowCanvas,
     assets: &Assets,
-    kind: &tja::SingleNoteKind,
+    kind: &SingleNoteKind,
     x: i32,
     y: i32,
 ) -> Result<(), TaikoError> {
     let texture = match kind.color {
-        tja::NoteColor::Don => match kind.size {
-            tja::NoteSize::Small => &assets.textures.note_don,
-            tja::NoteSize::Large => &assets.textures.note_don_large,
+        NoteColor::Don => match kind.size {
+            NoteSize::Small => &assets.textures.note_don,
+            NoteSize::Large => &assets.textures.note_don_large,
         },
-        tja::NoteColor::Ka => match kind.size {
-            tja::NoteSize::Small => &assets.textures.note_ka,
-            tja::NoteSize::Large => &assets.textures.note_ka_large,
+        NoteColor::Ka => match kind.size {
+            NoteSize::Small => &assets.textures.note_ka,
+            NoteSize::Large => &assets.textures.note_ka_large,
         },
     };
     canvas

@@ -1,8 +1,36 @@
-use crate::tja::{
-    Note as RawNote, NoteColor, NoteContent as NC, Score, SingleNoteContent, SingleNoteKind,
+use crate::structs::{
+    typed::{NoteContent, QuotaRenda, RendaContent, RendaKind, SingleNote, UnlimitedRenda},
+    *,
 };
+use crate::tja::Score;
 use itertools::Itertools;
 use std::collections::VecDeque;
+use std::convert::Infallible;
+
+pub struct OfGameState(Infallible);
+impl typed::NoteInfo for OfGameState {
+    type Note = ();
+    type SingleNote = SingleNoteState;
+    type RendaContent = RendaState;
+    type UnlimitedRenda = ();
+    type QuotaRenda = QuotaRendaState;
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct SingleNoteState {
+    pub hit: bool,
+}
+#[derive(Default, Debug, Clone)]
+pub struct RendaState {
+    pub count: u64,
+}
+#[derive(Default, Debug, Clone)]
+pub struct QuotaRendaState {
+    pub finished: bool,
+}
+
+// TODO use define_types macro
+pub type Note = typed::Note<OfGameState>;
 
 pub struct GameState<'a> {
     #[allow(dead_code)]
@@ -16,16 +44,33 @@ pub struct GameState<'a> {
     judge_strs: VecDeque<JudgeStr>,
 }
 
-pub struct Note {
-    pub note: RawNote,
-    pub remains: bool,
-}
-
-impl From<&RawNote> for Note {
-    fn from(note: &RawNote) -> Self {
-        Note {
-            note: note.clone(),
-            remains: true,
+impl From<&just::Note> for Note {
+    fn from(note: &just::Note) -> Self {
+        Self {
+            scroll_speed: note.scroll_speed.clone(),
+            time: note.time,
+            content: match &note.content {
+                NoteContent::Single(note) => NoteContent::Single(SingleNote {
+                    kind: note.kind.clone(),
+                    info: Default::default(),
+                }),
+                NoteContent::Renda(note) => NoteContent::Renda(RendaContent {
+                    kind: match &note.kind {
+                        RendaKind::Unlimited(note) => RendaKind::Unlimited(UnlimitedRenda {
+                            size: note.size.clone(),
+                            info: (),
+                        }),
+                        RendaKind::Quota(note) => RendaKind::Quota(QuotaRenda {
+                            kind: note.kind.clone(),
+                            quota: note.quota,
+                            info: Default::default(),
+                        }),
+                    },
+                    end_time: note.end_time,
+                    info: Default::default(),
+                }),
+            },
+            info: (),
         }
     }
 }
@@ -73,27 +118,27 @@ impl<'a> GameState<'a> {
     }
 
     pub fn hit(&mut self, color: NoteColor, time: f64) {
-        if let Some((remains, kind, diff)) = self
+        if let Some((note, diff)) = self
             .notes
             .iter_mut()
             .filter_map(|note| match note {
                 Note {
-                    remains: true,
-                    note:
-                        RawNote {
-                            content:
-                                NC::Normal(SingleNoteContent {
-                                    kind,
-                                    time: note_time,
-                                    ..
-                                }),
-                            ..
-                        },
-                } if kind.color == color => {
+                    time: note_time,
+                    content:
+                        typed::NoteContent::Single(
+                            note
+                            @
+                            SingleNote {
+                                info: SingleNoteState { hit: false },
+                                ..
+                            },
+                        ),
+                    ..
+                } if note.kind.color == color => {
                     let diff = (time - *note_time).abs();
                     if diff <= 0.150 / 2.0 {
                         // let kind = kind.clone();
-                        Some((&mut note.remains, &*kind, diff))
+                        Some((note, diff))
                     } else {
                         None
                     }
@@ -102,10 +147,10 @@ impl<'a> GameState<'a> {
             })
             .next()
         {
-            *remains = false;
+            note.info.hit = true;
             self.flying_notes.push_back(FlyingNote {
                 time,
-                kind: kind.clone(),
+                kind: note.kind.clone(),
             });
             self.judge_strs.push_back(JudgeStr {
                 time,
