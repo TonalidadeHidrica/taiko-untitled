@@ -26,7 +26,14 @@ pub struct RendaState {
 }
 #[derive(Default, Debug, Clone)]
 pub struct QuotaRendaState {
+    // TODO we don't actually need this field
     pub finished: bool,
+}
+
+impl SingleNote<OfGameState> {
+    fn corresponds(&self, color: &NoteColor) -> bool {
+        &self.kind.color == color && !self.info.hit
+    }
 }
 
 // TODO use define_types macro
@@ -38,6 +45,9 @@ pub struct GameState<'a> {
     notes: Vec<Note>,
 
     auto: bool,
+
+    judge_pointer: usize,
+    judge_bad_pointer: usize,
 
     // maybe this should not be here
     flying_notes: VecDeque<FlyingNote>,
@@ -91,6 +101,11 @@ pub enum Judge {
     Bad,
 }
 
+// https://discord.com/channels/194465239708729352/194465566042488833/657745859060039681
+const GOOD_WINDOW: f64 = 25.0250015258789 / 1000.0;
+const OK_WINDOW: f64 = 75.0750045776367 / 1000.0;
+const BAD_WINDOW: f64 = 108.441665649414 / 1000.0;
+
 impl<'a> GameState<'a> {
     pub fn new(score: &'a Score) -> Self {
         GameState {
@@ -98,6 +113,10 @@ impl<'a> GameState<'a> {
             notes: score.notes.iter().map(Into::into).collect_vec(),
 
             auto: false,
+
+            judge_pointer: 0,
+            judge_bad_pointer: 0,
+
             flying_notes: Default::default(),
             judge_strs: Default::default(),
         }
@@ -118,49 +137,129 @@ impl<'a> GameState<'a> {
     }
 
     pub fn hit(&mut self, color: NoteColor, time: f64) {
-        if let Some((note, diff)) = self
-            .notes
-            .iter_mut()
-            .filter_map(|note| match note {
-                Note {
-                    time: note_time,
-                    content:
-                        typed::NoteContent::Single(
-                            note
-                            @
-                            SingleNote {
-                                info: SingleNoteState { hit: false },
-                                ..
+        let flying_notes = &mut self.flying_notes;
+        let judge_strs = &mut self.judge_strs;
+        let _ = check_on_timeline(&mut self.notes, &mut self.judge_pointer, |note| match note
+            .content
+        {
+            NoteContent::Single(ref mut single_note) => match note.time - time {
+                t if t.abs() <= OK_WINDOW => {
+                    if single_note.corresponds(&color) {
+                        single_note.info.hit = true;
+                        flying_notes.push_back(FlyingNote {
+                            time,
+                            kind: single_note.kind.clone(),
+                        });
+                        judge_strs.push_back(JudgeStr {
+                            time,
+                            judge: if t.abs() <= GOOD_WINDOW {
+                                Judge::Good
+                            } else {
+                                Judge::Ok
                             },
-                        ),
-                    ..
-                } if note.kind.color == color => {
-                    let diff = (time - *note_time).abs();
-                    if diff <= 0.150 / 2.0 {
-                        // let kind = kind.clone();
-                        Some((note, diff))
+                        });
+                        JudgeOnTimeline::BreakWith(())
                     } else {
-                        None
+                        JudgeOnTimeline::Continue
                     }
                 }
-                _ => None,
-            })
-            .next()
-        {
-            note.info.hit = true;
-            self.flying_notes.push_back(FlyingNote {
-                time,
-                kind: note.kind.clone(),
-            });
-            self.judge_strs.push_back(JudgeStr {
-                time,
-                judge: if diff <= 0.050 / 2.0 {
-                    Judge::Good
+                t if t < 0.0 => JudgeOnTimeline::Past,
+                t if t > 0.0 => JudgeOnTimeline::Break,
+                _ => unreachable!(),
+            },
+            NoteContent::Renda(ref mut renda) => match () {
+                _ if note.time <= time && time < renda.end_time => {
+                    match &mut renda.kind {
+                        RendaKind::Unlimited(renda_u) => {
+                            renda.info.count += 1;
+                            flying_notes.push_back(FlyingNote {
+                                time,
+                                kind: SingleNoteKind {
+                                    color: color.clone(),
+                                    size: renda_u.size.clone(),
+                                },
+                            });
+                        }
+                        RendaKind::Quota(ref mut renda_q) => {
+                            if color == NoteColor::Don && !renda_q.info.finished {
+                                renda.info.count += 1;
+                                if renda.info.count >= renda_q.quota {
+                                    renda_q.info.finished = true;
+                                }
+                                flying_notes.push_back(FlyingNote {
+                                    time,
+                                    kind: SingleNoteKind {
+                                        color: color.clone(),
+                                        size: NoteSize::Small,
+                                    },
+                                });
+                            }
+                        }
+                    };
+                    JudgeOnTimeline::BreakWith(())
+                }
+                _ if renda.end_time <= time => JudgeOnTimeline::Past,
+                _ if time < note.time => JudgeOnTimeline::Break,
+                _ => unreachable!(),
+            },
+        })
+        .is_some()
+            || check_on_timeline(&mut self.notes, &mut self.judge_bad_pointer, |note| {
+                if let NoteContent::Single(ref mut single_note) = note.content {
+                    match note.time - time {
+                        t if t.abs() <= BAD_WINDOW => {
+                            if single_note.corresponds(&color) {
+                                single_note.info.hit = true;
+                                judge_strs.push_back(JudgeStr {
+                                    time,
+                                    judge: Judge::Bad,
+                                });
+                                JudgeOnTimeline::BreakWith(())
+                            } else {
+                                JudgeOnTimeline::Continue
+                            }
+                        }
+                        t if t < 0.0 => JudgeOnTimeline::Past,
+                        t if t > 0.0 => JudgeOnTimeline::Break,
+                        _ => unreachable!(),
+                    }
                 } else {
-                    Judge::Ok
-                },
-            });
-        }
+                    JudgeOnTimeline::Past
+                }
+            })
+            .is_some();
+
+        // if let Some((note, diff)) = self
+        //     .notes
+        //     .iter_mut()
+        //     .filter_map(|note| match note {
+        //         Note {
+        //             time: note_time,
+        //             content:
+        //                 typed::NoteContent::Single(
+        //                     note
+        //                     @
+        //                     SingleNote {
+        //                         info: SingleNoteState { hit: false },
+        //                         ..
+        //                     },
+        //                 ),
+        //             ..
+        //         } if note.kind.color == color => {
+        //             let diff = (time - *note_time).abs();
+        //             if diff <= 0.150 / 2.0 {
+        //                 // let kind = kind.clone();
+        //                 Some((note, diff))
+        //             } else {
+        //                 None
+        //             }
+        //         }
+        //         _ => None,
+        //     })
+        //     .next()
+        // {
+        //     note.info.hit = true;
+        // }
     }
 
     pub fn flying_notes<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &FlyingNote>
@@ -188,4 +287,27 @@ where
     let count = vec.iter().take_while(filter_out).count();
     vec.drain(..count);
     vec.iter()
+}
+
+// TODO naming and structure
+pub enum JudgeOnTimeline<T> {
+    Past,
+    Continue,
+    BreakWith(T),
+    Break,
+}
+
+fn check_on_timeline<T, U, F>(vec: &mut Vec<T>, pointer: &mut usize, mut f: F) -> Option<U>
+where
+    F: FnMut(&mut T) -> JudgeOnTimeline<U>,
+{
+    for (i, e) in vec[*pointer..].iter_mut().enumerate() {
+        match f(e) {
+            JudgeOnTimeline::Past => *pointer = i + 1,
+            JudgeOnTimeline::Break => break,
+            JudgeOnTimeline::BreakWith(u) => return Some(u),
+            _ => {}
+        }
+    }
+    None
 }
