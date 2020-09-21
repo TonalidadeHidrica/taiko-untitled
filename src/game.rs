@@ -228,38 +228,6 @@ impl<'a> GameState<'a> {
                 }
             })
             .is_some();
-
-        // if let Some((note, diff)) = self
-        //     .notes
-        //     .iter_mut()
-        //     .filter_map(|note| match note {
-        //         Note {
-        //             time: note_time,
-        //             content:
-        //                 typed::NoteContent::Single(
-        //                     note
-        //                     @
-        //                     SingleNote {
-        //                         info: SingleNoteState { hit: false },
-        //                         ..
-        //                     },
-        //                 ),
-        //             ..
-        //         } if note.kind.color == color => {
-        //             let diff = (time - *note_time).abs();
-        //             if diff <= 0.150 / 2.0 {
-        //                 // let kind = kind.clone();
-        //                 Some((note, diff))
-        //             } else {
-        //                 None
-        //             }
-        //         }
-        //         _ => None,
-        //     })
-        //     .next()
-        // {
-        //     note.info.hit = true;
-        // }
     }
 
     pub fn flying_notes<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &FlyingNote>
