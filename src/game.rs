@@ -7,7 +7,9 @@ use itertools::Itertools;
 use std::collections::VecDeque;
 use std::convert::Infallible;
 
+#[derive(Debug)]
 pub struct OfGameState(Infallible);
+
 impl typed::NoteInfo for OfGameState {
     type Note = ();
     type SingleNote = SingleNoteState;
@@ -18,8 +20,14 @@ impl typed::NoteInfo for OfGameState {
 
 #[derive(Default, Debug, Clone)]
 pub struct SingleNoteState {
-    pub hit: bool,
+    pub judge: Option<JudgeOrPassed>,
 }
+impl SingleNoteState {
+    pub fn visible(&self) -> bool {
+        !matches!(self.judge, Some(JudgeOrPassed::Judge(..)))
+    }
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct RendaState {
     pub count: u64,
@@ -31,8 +39,8 @@ pub struct QuotaRendaState {
 }
 
 impl SingleNote<OfGameState> {
-    fn corresponds(&self, color: &NoteColor) -> bool {
-        &self.kind.color == color && !self.info.hit
+    fn corresponds(&self, color: &Option<NoteColor>) -> bool {
+        self.info.judge.is_none() && color.as_ref().map_or(false, |c| &self.kind.color == c)
     }
 }
 
@@ -95,6 +103,19 @@ pub struct JudgeStr {
     pub judge: Judge,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum JudgeOrPassed {
+    Judge(Judge),
+    Passed,
+}
+
+impl From<Judge> for JudgeOrPassed {
+    fn from(judge: Judge) -> Self {
+        Self::Judge(judge)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum Judge {
     Good,
     Ok,
@@ -136,7 +157,7 @@ impl<'a> GameState<'a> {
         &self.notes
     }
 
-    pub fn hit(&mut self, color: NoteColor, time: f64) {
+    pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
         let flying_notes = &mut self.flying_notes;
         let judge_strs = &mut self.judge_strs;
         let _ = check_on_timeline(&mut self.notes, &mut self.judge_pointer, |note| match note
@@ -145,32 +166,35 @@ impl<'a> GameState<'a> {
             NoteContent::Single(ref mut single_note) => match note.time - time {
                 t if t.abs() <= OK_WINDOW => {
                     if single_note.corresponds(&color) {
-                        single_note.info.hit = true;
+                        let judge = if t.abs() <= GOOD_WINDOW {
+                            Judge::Good
+                        } else {
+                            Judge::Ok
+                        };
+                        single_note.info.judge = Some(judge.into());
                         flying_notes.push_back(FlyingNote {
                             time,
                             kind: single_note.kind.clone(),
                         });
-                        judge_strs.push_back(JudgeStr {
-                            time,
-                            judge: if t.abs() <= GOOD_WINDOW {
-                                Judge::Good
-                            } else {
-                                Judge::Ok
-                            },
-                        });
+                        judge_strs.push_back(JudgeStr { time, judge });
                         JudgeOnTimeline::BreakWith(())
                     } else {
                         JudgeOnTimeline::Continue
                     }
                 }
-                t if t < 0.0 => JudgeOnTimeline::Past,
+                t if t < 0.0 => {
+                    if single_note.info.judge.is_none() {
+                        single_note.info.judge = Some(JudgeOrPassed::Passed);
+                    }
+                    JudgeOnTimeline::Past
+                }
                 t if t > 0.0 => JudgeOnTimeline::Break,
                 _ => unreachable!(),
             },
             NoteContent::Renda(ref mut renda) => match () {
                 _ if note.time <= time && time < renda.end_time => {
-                    match &mut renda.kind {
-                        RendaKind::Unlimited(renda_u) => {
+                    match (&mut renda.kind, &color) {
+                        (RendaKind::Unlimited(renda_u), Some(color)) => {
                             renda.info.count += 1;
                             flying_notes.push_back(FlyingNote {
                                 time,
@@ -180,8 +204,8 @@ impl<'a> GameState<'a> {
                                 },
                             });
                         }
-                        RendaKind::Quota(ref mut renda_q) => {
-                            if color == NoteColor::Don && !renda_q.info.finished {
+                        (RendaKind::Quota(ref mut renda_q), Some(NoteColor::Don)) => {
+                            if !renda_q.info.finished {
                                 renda.info.count += 1;
                                 if renda.info.count >= renda_q.quota {
                                     renda_q.info.finished = true;
@@ -189,12 +213,13 @@ impl<'a> GameState<'a> {
                                 flying_notes.push_back(FlyingNote {
                                     time,
                                     kind: SingleNoteKind {
-                                        color: color.clone(),
+                                        color: NoteColor::Don,
                                         size: NoteSize::Small,
                                     },
                                 });
                             }
                         }
+                        _ => {}
                     };
                     JudgeOnTimeline::BreakWith(())
                 }
@@ -209,11 +234,9 @@ impl<'a> GameState<'a> {
                     match note.time - time {
                         t if t.abs() <= BAD_WINDOW => {
                             if single_note.corresponds(&color) {
-                                single_note.info.hit = true;
-                                judge_strs.push_back(JudgeStr {
-                                    time,
-                                    judge: Judge::Bad,
-                                });
+                                let judge = Judge::Bad;
+                                single_note.info.judge = Some(judge.into());
+                                judge_strs.push_back(JudgeStr { time, judge });
                                 JudgeOnTimeline::BreakWith(())
                             } else {
                                 JudgeOnTimeline::Continue

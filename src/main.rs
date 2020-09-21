@@ -171,7 +171,7 @@ fn main() -> Result<(), TaikoError> {
                             (game_state.as_mut(), music_position)
                         {
                             game_state.hit(
-                                color,
+                                Some(color),
                                 music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
                             );
                         }
@@ -190,6 +190,9 @@ fn main() -> Result<(), TaikoError> {
                 _ => {}
             }
         }
+        game_state
+            .as_mut()
+            .map(|g| music_position.to_owned().map(|m| g.hit(None, m)));
 
         canvas.set_draw_color(Color::RGBA(0, 0, 0, 0));
         canvas.clear();
@@ -235,10 +238,7 @@ fn main() -> Result<(), TaikoError> {
             // draw notes
             for note in game_state.notes().iter().rev() {
                 match &note.content {
-                    NoteContent::Single(single_note) => {
-                        if single_note.info.hit {
-                            continue;
-                        }
+                    NoteContent::Single(single_note) if single_note.info.visible() => {
                         let x = get_x(music_position, note.time, &note.scroll_speed);
                         draw_note(&mut canvas, &assets, &single_note.kind, x as i32, 288)?;
                     }
@@ -251,9 +251,10 @@ fn main() -> Result<(), TaikoError> {
                             NoteSize::Small => {
                                 (&assets.textures.renda_left, &assets.textures.renda_right)
                             }
-                            NoteSize::Large => {
-                                (&assets.textures.renda_large_left, &assets.textures.renda_large_right)
-                            }
+                            NoteSize::Large => (
+                                &assets.textures.renda_large_left,
+                                &assets.textures.renda_large_right,
+                            ),
                         };
                         let xs = get_x(music_position, note.time, &note.scroll_speed) as i32;
                         let xt = get_x(music_position, *end_time, &note.scroll_speed) as i32;
@@ -296,6 +297,7 @@ fn main() -> Result<(), TaikoError> {
                             )
                             .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
                     }
+                    _ => {}
                 }
             }
 
