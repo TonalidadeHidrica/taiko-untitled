@@ -57,7 +57,11 @@ pub struct GameState<'a> {
     judge_pointer: usize,
     judge_bad_pointer: usize,
 
-    // maybe this should not be here
+    animation_state: AnimationState,
+}
+
+#[derive(Default)]
+pub struct AnimationState {
     flying_notes: VecDeque<FlyingNote>,
     judge_strs: VecDeque<JudgeStr>,
 }
@@ -138,8 +142,7 @@ impl<'a> GameState<'a> {
             judge_pointer: 0,
             judge_bad_pointer: 0,
 
-            flying_notes: Default::default(),
-            judge_strs: Default::default(),
+            animation_state: Default::default(),
         }
     }
 
@@ -158,8 +161,7 @@ impl<'a> GameState<'a> {
     }
 
     pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
-        let flying_notes = &mut self.flying_notes;
-        let judge_strs = &mut self.judge_strs;
+        let animation_state = &mut self.animation_state;
         let _ = check_on_timeline(&mut self.notes, &mut self.judge_pointer, |note| match note
             .content
         {
@@ -172,11 +174,11 @@ impl<'a> GameState<'a> {
                             Judge::Ok
                         };
                         single_note.info.judge = Some(judge.into());
-                        flying_notes.push_back(FlyingNote {
+                        animation_state.flying_notes.push_back(FlyingNote {
                             time,
                             kind: single_note.kind.clone(),
                         });
-                        judge_strs.push_back(JudgeStr { time, judge });
+                        animation_state.judge_strs.push_back(JudgeStr { time, judge });
                         JudgeOnTimeline::BreakWith(())
                     } else {
                         JudgeOnTimeline::Continue
@@ -196,7 +198,7 @@ impl<'a> GameState<'a> {
                     match (&mut renda.kind, &color) {
                         (RendaKind::Unlimited(renda_u), Some(color)) => {
                             renda.info.count += 1;
-                            flying_notes.push_back(FlyingNote {
+                            animation_state.flying_notes.push_back(FlyingNote {
                                 time,
                                 kind: SingleNoteKind {
                                     color: color.clone(),
@@ -210,7 +212,7 @@ impl<'a> GameState<'a> {
                                 if renda.info.count >= renda_q.quota {
                                     renda_q.info.finished = true;
                                 }
-                                flying_notes.push_back(FlyingNote {
+                                animation_state.flying_notes.push_back(FlyingNote {
                                     time,
                                     kind: SingleNoteKind {
                                         color: NoteColor::Don,
@@ -236,7 +238,7 @@ impl<'a> GameState<'a> {
                             if single_note.corresponds(&color) {
                                 let judge = Judge::Bad;
                                 single_note.info.judge = Some(judge.into());
-                                judge_strs.push_back(JudgeStr { time, judge });
+                                animation_state.judge_strs.push_back(JudgeStr { time, judge });
                                 JudgeOnTimeline::BreakWith(())
                             } else {
                                 JudgeOnTimeline::Continue
@@ -257,14 +259,14 @@ impl<'a> GameState<'a> {
     where
         F: FnMut(&&FlyingNote) -> bool,
     {
-        filter_out_and_iter(&mut self.flying_notes, filter_out)
+        filter_out_and_iter(&mut self.animation_state.flying_notes, filter_out)
     }
 
     pub fn judge_strs<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &JudgeStr>
     where
         F: FnMut(&&JudgeStr) -> bool,
     {
-        filter_out_and_iter(&mut self.judge_strs, filter_out)
+        filter_out_and_iter(&mut self.animation_state.judge_strs, filter_out)
     }
 }
 
