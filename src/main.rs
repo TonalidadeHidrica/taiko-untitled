@@ -161,10 +161,10 @@ fn main() -> Result<(), TaikoError> {
                     timestamp,
                     ..
                 } => match keycode {
-                    Keycode::Z | Keycode::X | Keycode::Slash | Keycode::Underscore => {
+                    Keycode::Z | Keycode::X | Keycode::Slash | Keycode::Underscore | Keycode::Backslash => {
                         let color = match keycode {
                             Keycode::X | Keycode::Slash => NoteColor::Don,
-                            Keycode::Z | Keycode::Underscore => NoteColor::Ka,
+                            Keycode::Z | Keycode::Underscore | Keycode::Backslash => NoteColor::Ka,
                             _ => unreachable!(),
                         };
                         if let (Some(game_state), Some(music_position)) =
@@ -414,7 +414,7 @@ extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) 
                 // TODO send error to main thread
                 let _ = audio_manager.add_play(sound_don);
             }
-            Keycode::Z | Keycode::Underscore => {
+            Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
                 // TODO send error to main thread
                 let _ = audio_manager.add_play(sound_ka);
             }
