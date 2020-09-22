@@ -100,7 +100,7 @@ fn main() -> Result<(), TaikoError> {
         );
     }
 
-    let mut game_state = song
+    let mut game_manager = song
         .as_ref()
         .and_then(|song| (&song.score).as_ref())
         .map(|score| GameManager::new(&score));
@@ -167,10 +167,10 @@ fn main() -> Result<(), TaikoError> {
                             Keycode::Z | Keycode::Underscore | Keycode::Backslash => NoteColor::Ka,
                             _ => unreachable!(),
                         };
-                        if let (Some(game_state), Some(music_position)) =
-                            (game_state.as_mut(), music_position)
+                        if let (Some(game_manager), Some(music_position)) =
+                            (game_manager.as_mut(), music_position)
                         {
-                            game_state.hit(
+                            game_manager.hit(
                                 Some(color),
                                 music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
                             );
@@ -180,8 +180,8 @@ fn main() -> Result<(), TaikoError> {
                         audio_manager.play()?;
                     }
                     Keycode::F1 => {
-                        if let Some(ref mut game_state) = game_state {
-                            let auto = game_state.switch_auto();
+                        if let Some(ref mut game_manager) = game_manager {
+                            let auto = game_manager.switch_auto();
                             audio_manager.set_play_scheduled(auto)?;
                         }
                     }
@@ -190,7 +190,7 @@ fn main() -> Result<(), TaikoError> {
                 _ => {}
             }
         }
-        game_state
+        game_manager
             .as_mut()
             .map(|g| music_position.to_owned().map(|m| g.hit(None, m)));
 
@@ -208,9 +208,9 @@ fn main() -> Result<(), TaikoError> {
             Some(Song {
                 score: Some(score), ..
             }),
-            Some(ref mut game_state),
+            Some(ref mut game_manager),
             Some(music_position),
-        ) = (&song, game_state.as_mut(), audio_manager.music_position()?)
+        ) = (&song, game_manager.as_mut(), audio_manager.music_position()?)
         {
             // draw score
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
@@ -236,7 +236,7 @@ fn main() -> Result<(), TaikoError> {
                 .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
 
             // draw notes
-            for note in game_state.notes().iter().rev() {
+            for note in game_manager.notes().iter().rev() {
                 match &note.content {
                     NoteContent::Single(single_note) if single_note.info.visible() => {
                         let x = get_x(music_position, note.time, &note.scroll_speed);
@@ -304,7 +304,7 @@ fn main() -> Result<(), TaikoError> {
             canvas.set_clip_rect(None);
 
             // draw flying notes
-            for note in game_state
+            for note in game_manager
                 .flying_notes(|note| note.time <= music_position - 0.5)
                 .rev()
             {
@@ -319,7 +319,7 @@ fn main() -> Result<(), TaikoError> {
                 }
             }
 
-            for judge in game_state
+            for judge in game_manager
                 .judge_strs(|judge| (music_position - judge.time) * 60.0 >= 18.0)
                 .rev()
             {
