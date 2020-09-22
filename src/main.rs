@@ -15,7 +15,7 @@ use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
     TaikoError,
 };
-use taiko_untitled::game::{GameState, Judge};
+use taiko_untitled::game::{GameManager, Judge};
 use taiko_untitled::structs::{
     typed::{NoteContent, RendaContent, RendaKind},
     Bpm, NoteColor, NoteSize, SingleNoteKind,
@@ -103,7 +103,7 @@ fn main() -> Result<(), TaikoError> {
     let mut game_state = song
         .as_ref()
         .and_then(|song| (&song.score).as_ref())
-        .map(|score| GameState::new(&score));
+        .map(|score| GameManager::new(&score));
 
     if let Some(song_wave_path) = song.as_ref().and_then(|song| song.wave.as_ref()) {
         audio_manager.load_music(song_wave_path)?;

@@ -47,7 +47,7 @@ impl SingleNote<OfGameState> {
 // TODO use define_types macro
 pub type Note = typed::Note<OfGameState>;
 
-pub struct GameState<'a> {
+pub struct GameManager<'a> {
     #[allow(dead_code)]
     score: &'a Score,
     notes: Vec<Note>,
@@ -57,13 +57,42 @@ pub struct GameState<'a> {
     judge_pointer: usize,
     judge_bad_pointer: usize,
 
+    game_state: GameState,
     animation_state: AnimationState,
+}
+
+#[derive(Default, Debug)]
+pub struct GameState {
+    good_count: u32,
+    ok_count: u32,
+    bad_count: u32,
+
+    combo: u32,
+}
+
+impl GameState {
+    pub fn judge_count_mut(&mut self, judge: Judge) -> &mut u32 {
+        match judge {
+            Judge::Good => &mut self.good_count,
+            Judge::Ok => &mut self.ok_count,
+            Judge::Bad => &mut self.bad_count,
+        }
+    }
+
+    fn update_with_judge(&mut self, judge: Judge) {
+        *self.judge_count_mut(judge) += 1;
+        match judge {
+            Judge::Bad => self.combo = 0,
+            _ => self.combo  += 1,
+        }
+    }
 }
 
 #[derive(Default)]
 pub struct AnimationState {
     flying_notes: VecDeque<FlyingNote>,
     judge_strs: VecDeque<JudgeStr>,
+    last_combo_update: f64,
 }
 
 impl From<&just::Note> for Note {
@@ -131,9 +160,9 @@ const GOOD_WINDOW: f64 = 25.0250015258789 / 1000.0;
 const OK_WINDOW: f64 = 75.0750045776367 / 1000.0;
 const BAD_WINDOW: f64 = 108.441665649414 / 1000.0;
 
-impl<'a> GameState<'a> {
+impl<'a> GameManager<'a> {
     pub fn new(score: &'a Score) -> Self {
-        GameState {
+        GameManager {
             score,
             notes: score.notes.iter().map(Into::into).collect_vec(),
 
@@ -142,6 +171,7 @@ impl<'a> GameState<'a> {
             judge_pointer: 0,
             judge_bad_pointer: 0,
 
+            game_state: Default::default(),
             animation_state: Default::default(),
         }
     }
@@ -161,6 +191,7 @@ impl<'a> GameState<'a> {
     }
 
     pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
+        let game_state = &mut self.game_state;
         let animation_state = &mut self.animation_state;
         let _ = check_on_timeline(&mut self.notes, &mut self.judge_pointer, |note| match note
             .content
@@ -174,11 +205,15 @@ impl<'a> GameState<'a> {
                             Judge::Ok
                         };
                         single_note.info.judge = Some(judge.into());
+
+                        game_state.update_with_judge(judge);
                         animation_state.flying_notes.push_back(FlyingNote {
                             time,
                             kind: single_note.kind.clone(),
                         });
                         animation_state.judge_strs.push_back(JudgeStr { time, judge });
+                        animation_state.last_combo_update = time;
+
                         JudgeOnTimeline::BreakWith(())
                     } else {
                         JudgeOnTimeline::Continue
@@ -187,6 +222,7 @@ impl<'a> GameState<'a> {
                 t if t < 0.0 => {
                     if single_note.info.judge.is_none() {
                         single_note.info.judge = Some(JudgeOrPassed::Passed);
+                        game_state.update_with_judge(Judge::Bad);
                     }
                     JudgeOnTimeline::Past
                 }
@@ -238,6 +274,8 @@ impl<'a> GameState<'a> {
                             if single_note.corresponds(&color) {
                                 let judge = Judge::Bad;
                                 single_note.info.judge = Some(judge.into());
+                                // TODO when substituting, do not update_with_judge
+                                game_state.update_with_judge(judge);
                                 animation_state.judge_strs.push_back(JudgeStr { time, judge });
                                 JudgeOnTimeline::BreakWith(())
                             } else {
