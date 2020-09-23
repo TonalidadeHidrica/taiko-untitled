@@ -40,7 +40,7 @@ pub struct QuotaRendaState {
 
 impl SingleNote<OfGameState> {
     fn corresponds(&self, color: &Option<NoteColor>) -> bool {
-        self.info.judge.is_none() && color.as_ref().map_or(false, |c| &self.kind.color == c)
+        color.as_ref().map_or(false, |c| &self.kind.color == c)
     }
 }
 
@@ -198,7 +198,7 @@ impl<'a> GameManager<'a> {
         {
             NoteContent::Single(ref mut single_note) => match note.time - time {
                 t if t.abs() <= OK_WINDOW => {
-                    if single_note.corresponds(&color) {
+                    if single_note.info.judge.is_none() && single_note.corresponds(&color) {
                         let judge = if t.abs() <= GOOD_WINDOW {
                             Judge::Good
                         } else {
@@ -273,7 +273,9 @@ impl<'a> GameManager<'a> {
                 if let NoteContent::Single(ref mut single_note) = note.content {
                     match note.time - time {
                         t if t.abs() <= BAD_WINDOW => {
-                            if single_note.corresponds(&color) {
+                            if matches!(single_note.info.judge, None | Some(JudgeOrPassed::Passed))
+                                && single_note.corresponds(&color)
+                            {
                                 let judge = Judge::Bad;
                                 single_note.info.judge = Some(judge.into());
                                 // TODO when substituting, do not update_with_judge
