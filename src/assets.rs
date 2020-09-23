@@ -3,8 +3,8 @@ use crate::errors::{new_sdl_error, TaikoError, TaikoErrorCause};
 use sdl2::image::LoadTexture;
 use sdl2::render::{Texture, TextureCreator, TextureQuery};
 use sdl2::video::WindowContext;
-use std::path::Path;
 use std::fmt::Debug;
+use std::path::Path;
 
 pub struct Assets<'a> {
     pub textures: Textures<'a>,
@@ -139,11 +139,7 @@ impl<'a> Assets<'a> {
                 img_dir.join("gauge_right_yellow.png"),
                 (1044, 78),
             )?,
-            gauge_soul: load_texture_and_check_size(
-                tc,
-                img_dir.join("gauge_soul.png"),
-                (71, 63),
-            )?,
+            gauge_soul: load_texture_and_check_size(tc, img_dir.join("gauge_soul.png"), (71, 63))?,
         };
 
         let snd_dir = assets_dir.join("snd");

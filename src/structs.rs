@@ -65,6 +65,17 @@ pub mod typed {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct LevelUra(Level, bool);
+
+#[derive(Clone, Copy, Debug)]
+pub enum Level {
+    Easy,
+    Normal,
+    Hard,
+    Oni,
+}
+
 #[derive(Clone, Debug)]
 pub struct SingleNoteKind {
     pub color: NoteColor,

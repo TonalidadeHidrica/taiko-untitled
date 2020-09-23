@@ -4,9 +4,9 @@ use crate::structs::{
 };
 use crate::tja::Score;
 use itertools::Itertools;
+use num::clamp;
 use std::collections::VecDeque;
 use std::convert::Infallible;
-use num::clamp;
 
 #[derive(Debug)]
 pub struct OfGameState(Infallible);
