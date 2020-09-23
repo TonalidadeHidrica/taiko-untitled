@@ -285,10 +285,12 @@ impl<'a> GameManager<'a> {
                             if matches!(single_note.info.judge, None | Some(JudgeOrPassed::Passed))
                                 && single_note.corresponds(&color)
                             {
+                                let was_none = single_note.info.judge.is_none();
                                 let judge = Judge::Bad;
                                 single_note.info.judge = Some(judge.into());
-                                // TODO when substituting, do not update_with_judge
-                                game_state.update_with_judge(judge);
+                                if was_none {
+                                    game_state.update_with_judge(judge);
+                                }
                                 animation_state
                                     .judge_strs
                                     .push_back(JudgeStr { time, judge });
