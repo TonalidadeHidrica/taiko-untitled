@@ -3,6 +3,7 @@ use crate::structs::{
     *,
 };
 use crate::tja::Score;
+use enum_map::{enum_map, Enum, EnumMap};
 use itertools::Itertools;
 use num::clamp;
 use std::collections::VecDeque;
@@ -13,17 +14,18 @@ pub struct OfGameState(Infallible);
 
 impl typed::NoteInfo for OfGameState {
     type Note = ();
-    type SingleNote = SingleNoteState;
+    type SingleNote = SingleNoteInfo;
     type RendaContent = RendaState;
     type UnlimitedRenda = ();
     type QuotaRenda = QuotaRendaState;
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct SingleNoteState {
+pub struct SingleNoteInfo {
     pub judge: Option<JudgeOrPassed>,
+    gauge_delta: EnumMap<Judge, f64>,
 }
-impl SingleNoteState {
+impl SingleNoteInfo {
     pub fn visible(&self) -> bool {
         !matches!(self.judge, Some(JudgeOrPassed::Judge(..)))
     }
@@ -82,18 +84,20 @@ impl GameState {
         }
     }
 
-    fn update_with_judge(&mut self, judge: Judge) {
-        *self.judge_count_mut(judge) += 1;
-        match judge {
-            Judge::Bad => self.combo = 0,
-            _ => self.combo += 1,
+    fn update_with_judge<J: Into<JudgeOrPassed>>(&mut self, note: &mut SingleNote<OfGameState>, judge: J) {
+        let judge = judge.into();
+        let was_none = note.info.judge.is_none();
+        note.info.judge = Some(judge);
+
+        if was_none {
+            let judge = judge.into();
+            *self.judge_count_mut(judge) += 1;
+            match judge {
+                Judge::Bad => self.combo = 0,
+                _ => self.combo += 1,
+            }
+            self.gauge = clamp(self.gauge + note.info.gauge_delta[judge], 0.0, 10000.0);
         }
-        self.gauge += match judge {
-            Judge::Good => 20,
-            Judge::Ok => 10,
-            Judge::Bad => -40,
-        } as f64;
-        self.gauge = clamp(self.gauge, 0.0, 10000.0);
     }
 }
 
@@ -104,15 +108,18 @@ pub struct AnimationState {
     pub last_combo_update: f64,
 }
 
-impl From<&just::Note> for Note {
-    fn from(note: &just::Note) -> Self {
+impl Note {
+    fn new(note: &just::Note, gauge_delta: &EnumMap<Judge, f64>) -> Self {
         Self {
             scroll_speed: note.scroll_speed.clone(),
             time: note.time,
             content: match &note.content {
                 NoteContent::Single(note) => NoteContent::Single(SingleNote {
                     kind: note.kind.clone(),
-                    info: Default::default(),
+                    info: SingleNoteInfo {
+                        judge: None,
+                        gauge_delta: gauge_delta.clone(),
+                    },
                 }),
                 NoteContent::Renda(note) => NoteContent::Renda(RendaContent {
                     kind: match &note.kind {
@@ -157,7 +164,16 @@ impl From<Judge> for JudgeOrPassed {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+impl From<JudgeOrPassed> for Judge {
+    fn from(judge: JudgeOrPassed) -> Self {
+        match judge {
+            JudgeOrPassed::Judge(judge) => judge,
+            _ => Judge::Bad,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Enum)]
 pub enum Judge {
     Good,
     Ok,
@@ -171,9 +187,24 @@ const BAD_WINDOW: f64 = 108.441665649414 / 1000.0;
 
 impl<'a> GameManager<'a> {
     pub fn new(score: &'a Score) -> Self {
+        let combo_count = score
+            .notes
+            .iter()
+            .filter(|n| matches!(n.content, NoteContent::Single(..)))
+            .count();
+        // TODO change values depending on difficulties
+        let good_delta = match combo_count {
+            n if n >= 1 => (13113.0 / n as f64).round(),
+            _ => 0.0,
+        };
+        let gauge_delta = enum_map![
+            Judge::Good => good_delta,
+            Judge::Ok => (good_delta / 2.0).trunc(),
+            Judge::Bad => -good_delta * 2.0,
+        ];
         GameManager {
             score,
-            notes: score.notes.iter().map(Into::into).collect_vec(),
+            notes: score.notes.iter().map(|note| Note::new(note, &gauge_delta)).collect_vec(),
 
             auto: false,
 
@@ -213,9 +244,8 @@ impl<'a> GameManager<'a> {
                         } else {
                             Judge::Ok
                         };
-                        single_note.info.judge = Some(judge.into());
 
-                        game_state.update_with_judge(judge);
+                        game_state.update_with_judge(single_note, judge);
                         animation_state.flying_notes.push_back(FlyingNote {
                             time,
                             kind: single_note.kind.clone(),
@@ -232,8 +262,7 @@ impl<'a> GameManager<'a> {
                 }
                 t if t < 0.0 => {
                     if single_note.info.judge.is_none() {
-                        single_note.info.judge = Some(JudgeOrPassed::Passed);
-                        game_state.update_with_judge(Judge::Bad);
+                        game_state.update_with_judge(single_note, JudgeOrPassed::Passed);
                     }
                     JudgeOnTimeline::Past
                 }
@@ -285,12 +314,8 @@ impl<'a> GameManager<'a> {
                             if matches!(single_note.info.judge, None | Some(JudgeOrPassed::Passed))
                                 && single_note.corresponds(&color)
                             {
-                                let was_none = single_note.info.judge.is_none();
                                 let judge = Judge::Bad;
-                                single_note.info.judge = Some(judge.into());
-                                if was_none {
-                                    game_state.update_with_judge(judge);
-                                }
+                                game_state.update_with_judge(single_note, judge);
                                 animation_state
                                     .judge_strs
                                     .push_back(JudgeStr { time, judge });
