@@ -57,17 +57,17 @@ pub struct GameManager<'a> {
     judge_pointer: usize,
     judge_bad_pointer: usize,
 
-    game_state: GameState,
-    animation_state: AnimationState,
+    pub game_state: GameState,
+    pub animation_state: AnimationState,
 }
 
 #[derive(Default, Debug)]
 pub struct GameState {
-    good_count: u32,
-    ok_count: u32,
-    bad_count: u32,
+    pub good_count: u32,
+    pub ok_count: u32,
+    pub bad_count: u32,
 
-    combo: u32,
+    pub combo: u32,
 }
 
 impl GameState {
@@ -83,7 +83,7 @@ impl GameState {
         *self.judge_count_mut(judge) += 1;
         match judge {
             Judge::Bad => self.combo = 0,
-            _ => self.combo  += 1,
+            _ => self.combo += 1,
         }
     }
 }
@@ -92,7 +92,7 @@ impl GameState {
 pub struct AnimationState {
     flying_notes: VecDeque<FlyingNote>,
     judge_strs: VecDeque<JudgeStr>,
-    last_combo_update: f64,
+    pub last_combo_update: f64,
 }
 
 impl From<&just::Note> for Note {
@@ -211,7 +211,9 @@ impl<'a> GameManager<'a> {
                             time,
                             kind: single_note.kind.clone(),
                         });
-                        animation_state.judge_strs.push_back(JudgeStr { time, judge });
+                        animation_state
+                            .judge_strs
+                            .push_back(JudgeStr { time, judge });
                         animation_state.last_combo_update = time;
 
                         JudgeOnTimeline::BreakWith(())
@@ -276,7 +278,9 @@ impl<'a> GameManager<'a> {
                                 single_note.info.judge = Some(judge.into());
                                 // TODO when substituting, do not update_with_judge
                                 game_state.update_with_judge(judge);
-                                animation_state.judge_strs.push_back(JudgeStr { time, judge });
+                                animation_state
+                                    .judge_strs
+                                    .push_back(JudgeStr { time, judge });
                                 JudgeOnTimeline::BreakWith(())
                             } else {
                                 JudgeOnTimeline::Continue

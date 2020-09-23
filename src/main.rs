@@ -161,7 +161,11 @@ fn main() -> Result<(), TaikoError> {
                     timestamp,
                     ..
                 } => match keycode {
-                    Keycode::Z | Keycode::X | Keycode::Slash | Keycode::Underscore | Keycode::Backslash => {
+                    Keycode::Z
+                    | Keycode::X
+                    | Keycode::Slash
+                    | Keycode::Underscore
+                    | Keycode::Backslash => {
                         let color = match keycode {
                             Keycode::X | Keycode::Slash => NoteColor::Don,
                             Keycode::Z | Keycode::Underscore | Keycode::Backslash => NoteColor::Ka,
@@ -210,8 +214,11 @@ fn main() -> Result<(), TaikoError> {
             }),
             Some(ref mut game_manager),
             Some(music_position),
-        ) = (&song, game_manager.as_mut(), audio_manager.music_position()?)
-        {
+        ) = (
+            &song,
+            game_manager.as_mut(),
+            audio_manager.music_position()?,
+        ) {
             // draw score
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
@@ -339,6 +346,42 @@ fn main() -> Result<(), TaikoError> {
                 canvas
                     .copy(texture, None, Some(Rect::new(552, y as i32, 135, 90)))
                     .map_err(|e| new_sdl_error("Failed to draw judge str", e))?;
+            }
+
+            let combo = game_manager.game_state.combo;
+            if let Some(textures) = match () {
+                _ if combo < 10 => None,
+                _ if combo < 50 => Some(&assets.textures.combo_nummber_white),
+                _ if combo < 100 => Some(&assets.textures.combo_nummber_silver),
+                _ => Some(&assets.textures.combo_nummber_gold),
+            } {
+                let digits = combo
+                    .to_string()
+                    .chars()
+                    .map(|c| c.to_digit(10).unwrap())
+                    .collect_vec();
+                let w = (52.0 * digits.len() as f64).min(44.0 * 4.0);
+                let x = 399.0 - w / 2.0;
+                let w = w / digits.len() as f64;
+                let yd = match (music_position - game_manager.animation_state.last_combo_update)
+                    * 60.0
+                {
+                    t if t < 2.0 => t * 7.5,
+                    t if t < 9.0 => (9.0 - t) * 15.0 / 7.0,
+                    _ => 0.0,
+                };
+                for (i, t) in digits.iter().map(|&i| &textures[i as usize]).enumerate() {
+                    let x = x + w * i as f64 - w * 3.0 / 44.0;
+                    let rect = Rect::new(
+                        x as i32,
+                        (334.0 - yd) as i32,
+                        (w * 55.0 / 44.0) as u32,
+                        (77.0 + yd) as u32,
+                    );
+                    canvas
+                        .copy(t, None, rect)
+                        .map_err(|e| new_sdl_error("Failed to draw combo number", e))?;
+                }
             }
         }
 

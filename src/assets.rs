@@ -23,6 +23,9 @@ pub struct Textures<'a> {
     pub judge_text_good: Texture<'a>,
     pub judge_text_ok: Texture<'a>,
     pub judge_text_bad: Texture<'a>,
+    pub combo_nummber_white: Vec<Texture<'a>>,
+    pub combo_nummber_silver: Vec<Texture<'a>>,
+    pub combo_nummber_gold: Vec<Texture<'a>>,
 }
 
 pub struct Chunks {
@@ -88,6 +91,15 @@ impl<'a> Assets<'a> {
                 img_dir.join("judge_text_bad.png"),
                 (135, 90),
             )?,
+            combo_nummber_white: load_combo_textures(|i| {
+                tc.load_texture(img_dir.join(format!("combo_number_white_{}.png", i)))
+            })?,
+            combo_nummber_silver: load_combo_textures(|i| {
+                tc.load_texture(img_dir.join(format!("combo_number_silver_{}.png", i)))
+            })?,
+            combo_nummber_gold: load_combo_textures(|i| {
+                tc.load_texture(img_dir.join(format!("combo_number_gold_{}.png", i)))
+            })?,
         };
 
         let snd_dir = assets_dir.join("snd");
@@ -125,4 +137,14 @@ fn load_texture_and_check_size<P: AsRef<Path>>(
         }
     }
     Ok(texture)
+}
+
+fn load_combo_textures<'a, F>(to_texture: F) -> Result<Vec<Texture<'a>>, TaikoError>
+where
+    F: Fn(usize) -> Result<Texture<'a>, String>,
+{
+    (0..10)
+        .map(to_texture)
+        .collect::<Result<_, _>>()
+        .map_err(|s| new_sdl_error("Failed to load a texture", s))
 }
