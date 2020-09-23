@@ -1,5 +1,6 @@
 use itertools::iterate;
 use itertools::Itertools;
+use num::clamp;
 use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
@@ -198,7 +199,7 @@ fn main() -> Result<(), TaikoError> {
             .as_mut()
             .map(|g| music_position.to_owned().map(|m| g.hit(None, m)));
 
-        canvas.set_draw_color(Color::RGBA(0, 0, 0, 0));
+        canvas.set_draw_color(Color::RGBA(20, 20, 20, 0));
         canvas.clear();
         canvas
             .copy(
@@ -207,6 +208,11 @@ fn main() -> Result<(), TaikoError> {
                 Some(Rect::new(0, 0, 1920, 1080)),
             )
             .map_err(|s| new_sdl_error("Failed to draw background", s))?;
+
+        let gauge = game_manager.as_ref().map_or(0.0, |g| g.game_state.gauge);
+        let gauge = clamp(gauge, 0.0, 10000.0) as u32 / 200;
+        draw_gauge(&mut canvas, &assets, gauge, 39, 50)
+            .map_err(|e| new_sdl_error("Failed to drawr", e))?;
 
         if let (
             Some(Song {
@@ -426,6 +432,83 @@ fn draw_note(
     canvas
         .copy(texture, None, Rect::new(x, y, 195, 195))
         .map_err(|e| new_sdl_error("Failed to draw a note", e))
+}
+
+fn draw_gauge(
+    canvas: &mut WindowCanvas,
+    assets: &Assets,
+    gauge: u32,
+    clear_count: u32,
+    all_count: u32,
+) -> Result<(), String> {
+    canvas.copy(
+        &assets.textures.gauge_left_base,
+        None,
+        Rect::new(726, 204, 1920, 78),
+    )?;
+    canvas.copy(
+        &assets.textures.gauge_right_base,
+        None,
+        Rect::new(726 + clear_count as i32 * 21, 204, 1920, 78),
+    )?;
+
+    let gauge_count = clamp(gauge, 0, clear_count);
+    let src = Rect::new(0, 0, 21 * gauge_count, 78);
+    canvas.copy(
+        &assets.textures.gauge_left_red,
+        src,
+        Rect::new(738, 204, src.width(), src.height()),
+    )?;
+
+    let src = Rect::new(
+        21 * gauge_count as i32,
+        0,
+        21 * (clear_count - gauge_count),
+        78,
+    );
+    canvas.copy(
+        &assets.textures.gauge_left_dark,
+        src,
+        Rect::new(738 + src.x(), 204, src.width(), src.height()),
+    )?;
+
+    let max_width = 21 * (all_count - clear_count) - 6;
+    let gauge_count = clamp(gauge, clear_count, all_count);
+    let src = Rect::new(0, 0, max_width.min(21 * (gauge_count - clear_count)), 78);
+    canvas.copy(
+        &assets.textures.gauge_right_yellow,
+        src,
+        Rect::new(
+            738 + clear_count as i32 * 21,
+            204,
+            src.width(),
+            src.height(),
+        ),
+    )?;
+
+    let src = Rect::new(
+        max_width.min(21 * (gauge_count - clear_count)) as i32,
+        0,
+        max_width.min(21 * (all_count - gauge_count)),
+        78,
+    );
+    canvas.copy(
+        &assets.textures.gauge_right_dark,
+        src,
+        Rect::new(
+            738 + clear_count as i32 * 21 + src.x(),
+            204,
+            src.width(),
+            src.height(),
+        ),
+    )?;
+
+    canvas.copy(
+        &assets.textures.gauge_soul,
+        None,
+        Rect::new(1799, 215, 71, 63),
+    )?;
+    Ok(())
 }
 
 extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) -> i32 {

@@ -4,6 +4,7 @@ use sdl2::image::LoadTexture;
 use sdl2::render::{Texture, TextureCreator, TextureQuery};
 use sdl2::video::WindowContext;
 use std::path::Path;
+use std::fmt::Debug;
 
 pub struct Assets<'a> {
     pub textures: Textures<'a>,
@@ -26,6 +27,14 @@ pub struct Textures<'a> {
     pub combo_nummber_white: Vec<Texture<'a>>,
     pub combo_nummber_silver: Vec<Texture<'a>>,
     pub combo_nummber_gold: Vec<Texture<'a>>,
+
+    pub gauge_left_base: Texture<'a>,
+    pub gauge_left_dark: Texture<'a>,
+    pub gauge_left_red: Texture<'a>,
+    pub gauge_right_base: Texture<'a>,
+    pub gauge_right_dark: Texture<'a>,
+    pub gauge_right_yellow: Texture<'a>,
+    pub gauge_soul: Texture<'a>,
 }
 
 pub struct Chunks {
@@ -100,6 +109,41 @@ impl<'a> Assets<'a> {
             combo_nummber_gold: load_combo_textures(|i| {
                 tc.load_texture(img_dir.join(format!("combo_number_gold_{}.png", i)))
             })?,
+            gauge_left_base: load_texture_and_check_size(
+                tc,
+                img_dir.join("gauge_left_base.png"),
+                (1920, 78),
+            )?,
+            gauge_left_dark: load_texture_and_check_size(
+                tc,
+                img_dir.join("gauge_left_dark.png"),
+                (1044, 78),
+            )?,
+            gauge_left_red: load_texture_and_check_size(
+                tc,
+                img_dir.join("gauge_left_red.png"),
+                (1044, 78),
+            )?,
+            gauge_right_base: load_texture_and_check_size(
+                tc,
+                img_dir.join("gauge_right_base.png"),
+                (1920, 78),
+            )?,
+            gauge_right_dark: load_texture_and_check_size(
+                tc,
+                img_dir.join("gauge_right_dark.png"),
+                (1044, 78),
+            )?,
+            gauge_right_yellow: load_texture_and_check_size(
+                tc,
+                img_dir.join("gauge_right_yellow.png"),
+                (1044, 78),
+            )?,
+            gauge_soul: load_texture_and_check_size(
+                tc,
+                img_dir.join("gauge_soul.png"),
+                (71, 63),
+            )?,
         };
 
         let snd_dir = assets_dir.join("snd");
@@ -119,24 +163,26 @@ impl<'a> Assets<'a> {
     }
 }
 
-fn load_texture_and_check_size<P: AsRef<Path>>(
+fn load_texture_and_check_size<P: AsRef<Path> + Debug>(
     texture_creator: &TextureCreator<WindowContext>,
     path: P,
     required_dimensions: (u32, u32),
 ) -> Result<Texture, TaikoError> {
     let texture = texture_creator
-        .load_texture(path)
+        .load_texture(&path)
         .map_err(|s| new_sdl_error("Failed to load background texture", s))?;
-    match texture.query() {
-        TextureQuery { width, height, .. } if (width, height) == required_dimensions => {}
-        _ => {
-            return Err(TaikoError {
-                message: "Texture size of the background is invalid".to_string(),
-                cause: TaikoErrorCause::InvalidResourceError,
-            });
-        }
+    let TextureQuery { width, height, .. } = texture.query();
+    if (width, height) == required_dimensions {
+        Ok(texture)
+    } else {
+        Err(TaikoError {
+            message: format!(
+                "Texture size of {:?} is invalid: expected {:?}, found ({}, {})",
+                &path, required_dimensions, width, height
+            ),
+            cause: TaikoErrorCause::InvalidResourceError,
+        })
     }
-    Ok(texture)
 }
 
 fn load_combo_textures<'a, F>(to_texture: F) -> Result<Vec<Texture<'a>>, TaikoError>

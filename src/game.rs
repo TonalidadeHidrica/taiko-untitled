@@ -6,6 +6,7 @@ use crate::tja::Score;
 use itertools::Itertools;
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use num::clamp;
 
 #[derive(Debug)]
 pub struct OfGameState(Infallible);
@@ -68,6 +69,8 @@ pub struct GameState {
     pub bad_count: u32,
 
     pub combo: u32,
+    // f64 has enough precision.  See the test below
+    pub gauge: f64,
 }
 
 impl GameState {
@@ -85,6 +88,12 @@ impl GameState {
             Judge::Bad => self.combo = 0,
             _ => self.combo += 1,
         }
+        self.gauge += match judge {
+            Judge::Good => 20,
+            Judge::Ok => 10,
+            Judge::Bad => -40,
+        } as f64;
+        self.gauge = clamp(self.gauge, 0.0, 10000.0);
     }
 }
 
@@ -347,4 +356,18 @@ where
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    /// In the original system, gauge count is calculated as integer with maximumm value of 10000.
+    /// We use f64 to store the gauge value, which is precise enough to store exact values.
+    #[test]
+    fn f64_has_enough_precision() {
+        let mut f = 0.0;
+        for i in 0..=10000 {
+            assert_eq!(f, i as f32);
+            f += 1.0;
+        }
+    }
 }
