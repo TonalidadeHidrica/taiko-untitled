@@ -131,7 +131,9 @@ fn main() -> Result<(), MainErr> {
     let mut fixed = false;
     let mut speed_up = false;
     let mut cursor_mode = true;
-    let mut note_x = 500;
+    let (mut note_x, mut note_y) = (500, 288);
+    let mut frame_id = -1;
+    let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
 
     let start = Instant::now();
 
@@ -151,19 +153,39 @@ fn main() -> Result<(), MainErr> {
                     Keycode::F => fixed = !fixed,
                     Keycode::S => speed_up = !speed_up,
                     Keycode::C => cursor_mode = !cursor_mode,
+                    Keycode::Q => texture_width = max(1, texture_width - 1),
+                    Keycode::W => texture_width += 1,
                     Keycode::L => {
+                        config.refresh()?;
+                        let notes_path = config.get_str("notes_image").ok();
                         image_texture = match image_path {
                             Some(ref image_path) => Some(texture_creator.load_texture(image_path)?),
                             _ => None,
                         };
                         notes_texture = match notes_path {
-                            Some(ref path) => Some(texture_creator.load_texture(path)?),
+                            Some(ref path) => {
+                                let t = texture_creator.load_texture(path)?;
+                                texture_width = t.query().width;
+                                Some(t)
+                            }
                             _ => None,
                         };
                     }
+                    Keycode::P => {
+                        println!("{}\t{}\t{}\t{}", frame_id, note_x, note_y, texture_width);
+                    }
                     Keycode::Left | Keycode::Right => {
-                        note_x += match () {
-                            _ if keycode == Keycode::Right => 1,
+                        note_x += match keycode {
+                            Keycode::Right => 1,
+                            _ => -1,
+                        } * match () {
+                            _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 10,
+                            _ => 1,
+                        }
+                    }
+                    Keycode::Up | Keycode::Down => {
+                        note_y += match keycode {
+                            Keycode::Down => 1,
                             _ => -1,
                         } * match () {
                             _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 10,
@@ -171,7 +193,7 @@ fn main() -> Result<(), MainErr> {
                         }
                     }
                     Keycode::Period => {
-                        update_next_frame_to_texture(&mut video_texture, &mut video_reader)?;
+                        update_next_frame_to_texture(&mut video_texture, &mut video_reader, &mut frame_id)?;
                     }
                     _ => {}
                 },
@@ -191,7 +213,7 @@ fn main() -> Result<(), MainErr> {
                     video_reader.next_frame()?;
                 }
             }
-            update_next_frame_to_texture(&mut video_texture, &mut video_reader)?;
+            update_next_frame_to_texture(&mut video_texture, &mut video_reader, &mut frame_id)?;
         }
 
         let origin_x = focus_x * (1 - zoom_proportion as i32);
@@ -244,14 +266,15 @@ fn main() -> Result<(), MainErr> {
                 )?;
             }
             if let Some(ref notes_texture) = notes_texture {
+                let dim = notes_texture.query();
                 canvas.copy(
                     notes_texture,
                     note_dimension,
                     Rect::new(
                         origin_x + note_x * zoom_proportion as i32,
-                        origin_y + 288 * zoom_proportion as i32,
-                        195 * zoom_proportion,
-                        195 * zoom_proportion,
+                        origin_y + note_y * zoom_proportion as i32,
+                        texture_width * zoom_proportion,
+                        dim.height * zoom_proportion,
                     ),
                 )?;
             }
@@ -302,6 +325,7 @@ fn main() -> Result<(), MainErr> {
 fn update_next_frame_to_texture(
     video_texture: &mut Texture,
     video_reader: &mut VideoReader,
+    frame_id: &mut i32,
 ) -> Result<(), MainErr> {
     if let Some(frame) = video_reader.next_frame()? {
         let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
@@ -315,6 +339,7 @@ fn update_next_frame_to_texture(
             frame.data(2),
             frame.stride(2),
         )?;
+        *frame_id += 1;
     }
     Ok(())
 }
