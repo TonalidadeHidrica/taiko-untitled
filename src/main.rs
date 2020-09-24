@@ -14,6 +14,7 @@ use std::cmp::max;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::time::Instant;
+use taiko_untitled::assets::Textures;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 
 #[derive(Debug)]
@@ -119,6 +120,7 @@ fn main() -> Result<(), MainErr> {
         _ => None,
     };
 
+    let mut textures = Textures::new(&texture_creator)?;
     let font = ttf_context.load_font(font_path, 24)?;
 
     let mut input_context = format::input(&video_path)?;
@@ -134,6 +136,7 @@ fn main() -> Result<(), MainErr> {
     let (mut note_x, mut note_y) = (500, 288);
     let mut frame_id = -1;
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
+    let mut draw_gauge = false;
 
     let start = Instant::now();
 
@@ -153,6 +156,7 @@ fn main() -> Result<(), MainErr> {
                     Keycode::F => fixed = !fixed,
                     Keycode::S => speed_up = !speed_up,
                     Keycode::C => cursor_mode = !cursor_mode,
+                    Keycode::G => draw_gauge = !draw_gauge,
                     Keycode::Q => texture_width = max(1, texture_width - 1),
                     Keycode::W => texture_width += 1,
                     Keycode::L => {
@@ -170,6 +174,7 @@ fn main() -> Result<(), MainErr> {
                             }
                             _ => None,
                         };
+                        textures = Textures::new(&texture_creator)?;
                     }
                     Keycode::P => {
                         println!("{}\t{}\t{}\t{}", frame_id, note_x, note_y, texture_width);
@@ -193,7 +198,11 @@ fn main() -> Result<(), MainErr> {
                         }
                     }
                     Keycode::Period => {
-                        update_next_frame_to_texture(&mut video_texture, &mut video_reader, &mut frame_id)?;
+                        update_next_frame_to_texture(
+                            &mut video_texture,
+                            &mut video_reader,
+                            &mut frame_id,
+                        )?;
                     }
                     _ => {}
                 },
@@ -207,6 +216,17 @@ fn main() -> Result<(), MainErr> {
             }
         }
 
+        let origin_x = focus_x * (1 - zoom_proportion as i32);
+        let origin_y = focus_y * (1 - zoom_proportion as i32);
+        let affine = |x, y, w, h| {
+            Rect::new(
+                origin_x + x * zoom_proportion as i32,
+                origin_y + y * zoom_proportion as i32,
+                w * zoom_proportion,
+                h * zoom_proportion,
+            )
+        };
+
         if do_play {
             if speed_up {
                 for _ in 0..5 {
@@ -216,18 +236,10 @@ fn main() -> Result<(), MainErr> {
             update_next_frame_to_texture(&mut video_texture, &mut video_reader, &mut frame_id)?;
         }
 
-        let origin_x = focus_x * (1 - zoom_proportion as i32);
-        let origin_y = focus_y * (1 - zoom_proportion as i32);
-
         canvas.copy(
             &video_texture,
             None,
-            Some(Rect::new(
-                origin_x,
-                origin_y,
-                width * zoom_proportion,
-                height * zoom_proportion,
-            )),
+            affine(0, 0, width, height),
         )?;
 
         if cursor_mode {
@@ -257,12 +269,7 @@ fn main() -> Result<(), MainErr> {
                 canvas.copy(
                     image_texture,
                     None,
-                    Some(Rect::new(
-                        origin_x,
-                        origin_y,
-                        width * zoom_proportion,
-                        height * zoom_proportion,
-                    )),
+                    affine(0, 0, width, height),
                 )?;
             }
             if let Some(ref notes_texture) = notes_texture {
@@ -270,14 +277,38 @@ fn main() -> Result<(), MainErr> {
                 canvas.copy(
                     notes_texture,
                     note_dimension,
-                    Rect::new(
-                        origin_x + note_x * zoom_proportion as i32,
-                        origin_y + note_y * zoom_proportion as i32,
-                        texture_width * zoom_proportion,
-                        dim.height * zoom_proportion,
-                    ),
+                    affine(note_x, note_y, texture_width, dim.height),
                 )?;
             }
+
+            if draw_gauge {
+                // let gauge = game_manager.map_or(0.0, |g| g.game_state.gauge);
+                let clear_count = 39;
+                let all_count = 50;
+                canvas.copy(
+                    &textures.gauge_left_base,
+                    None,
+                    affine(726, 204, 1920, 78),
+                )?;
+                canvas.copy(
+                    &textures.gauge_right_base,
+                    None,
+                    affine(726 + clear_count * 21, 204, 1920, 78),
+                )?;
+                let src = Rect::new(0, 0, 21 * clear_count as u32, 78);
+                canvas.copy(
+                    &textures.gauge_left_red,
+                    src,
+                    affine(738, 204, src.width(), src.height()),
+                )?;
+                let src = Rect::new(0, 0, 21 * (all_count - clear_count as u32) - 6, 78);
+                canvas.copy(
+                    &textures.gauge_right_yellow,
+                    src,
+                    affine(738 + clear_count * 21, 204, src.width(), src.height()),
+                )?;
+            }
+
             canvas.set_clip_rect(None);
         }
 
