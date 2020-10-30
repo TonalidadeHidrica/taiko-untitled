@@ -1,3 +1,5 @@
+use enum_map::Enum;
+
 pub mod typed {
     use super::*;
     use std::fmt::Debug;
@@ -23,6 +25,7 @@ pub mod typed {
         pub scroll_speed: Bpm,
         pub time: f64,
         pub content: NoteContent<T>,
+        pub branch: Option<BranchType>,
         pub info: T::Note,
     }
 
@@ -127,7 +130,7 @@ impl Bpm {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Enum)]
 pub enum BranchType {
     Normal,
     Expert,

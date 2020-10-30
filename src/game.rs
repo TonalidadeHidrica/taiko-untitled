@@ -141,6 +141,7 @@ impl Note {
                     info: Default::default(),
                 }),
             },
+            branch: note.branch,
             info: (),
         }
     }

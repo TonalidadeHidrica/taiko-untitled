@@ -2,7 +2,9 @@ use crate::structs::just::*;
 use crate::structs::*;
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
+use enum_map::EnumMap;
 use itertools::Itertools;
+use ordered_float::OrderedFloat;
 use std::cmp::{max, min};
 use std::collections::VecDeque;
 use std::fs::File;
@@ -175,6 +177,7 @@ struct SubsequentBranchContext {
     end_state: ParserState,
     shared_elements: Vec<(usize, Vec<(usize, TjaElement)>)>,
     measure_index: usize,
+    filled_branch: EnumMap<BranchType, bool>,
 }
 
 impl SongContext {
@@ -210,7 +213,7 @@ impl SongContext {
         }
         let notes_count = max(1, notes_count);
 
-        let (parse_notes, parse_bpm) = match &self.branch_context {
+        let (parse_notes, parse_tempo) = match &self.branch_context {
             BranchContext::Outside => (true, true),
             BranchContext::Started => {
                 eprintln!(
@@ -219,7 +222,7 @@ impl SongContext {
                 eprintln!("The commands will be accepted, while the notes will be ignored.");
                 (false, true)
             }
-            BranchContext::First(context) => (true, true),
+            BranchContext::First(..) => (true, true),
             BranchContext::Subsequent(context) => {
                 if context.measure_index < context.shared_elements.len() {
                     (true, false)
@@ -299,7 +302,10 @@ impl SongContext {
                                 })));
                             None
                         }
-                        '8' => Self::terminate_renda(&mut self.parser_state),
+                        '8' => {
+                            let branch = self.current_branch();
+                            Self::terminate_renda(&mut self.parser_state, branch)
+                        }
                         '9' => {
                             let quota = self.balloons.pop_front().unwrap_or(5);
                             self.parser_state.renda =
@@ -330,11 +336,11 @@ impl SongContext {
                         * self.bpm.get_beat_duration()
                         / notes_count as f64;
                 }
-                TjaElement::BpmChange(bpm) if parse_bpm => self.bpm = Bpm(*bpm),
+                TjaElement::BpmChange(bpm) if parse_tempo => self.bpm = Bpm(*bpm),
                 TjaElement::Gogo(gogo) => self.parser_state.gogo = *gogo,
-                TjaElement::Measure(a, b) if parse_bpm => self.measure = Measure(*a, *b),
+                TjaElement::Measure(a, b) if parse_tempo => self.measure = Measure(*a, *b),
                 TjaElement::Scroll(scroll) => self.parser_state.hs = *scroll,
-                TjaElement::Delay(delay) if parse_bpm => self.parser_state.time += delay,
+                TjaElement::Delay(delay) if parse_tempo => self.parser_state.time += delay,
                 TjaElement::BarLine(bar) => self.parser_state.bar_line = *bar,
                 _ => {
                     // Element was ignored due to illegal syntax in the tja file
@@ -345,7 +351,12 @@ impl SongContext {
                     element,
                     TjaElement::BpmChange(..) | TjaElement::Measure(..) | TjaElement::Delay(..)
                 ) {
-                    context.shared_elements.last_mut().unwrap().1.push((note_index, element.clone()));
+                    context
+                        .shared_elements
+                        .last_mut()
+                        .unwrap()
+                        .1
+                        .push((note_index, element.clone()));
                 }
             }
         }
@@ -365,6 +376,7 @@ impl SongContext {
             time: self.parser_state.time,
             scroll_speed: self.scroll_speed(),
             content: note_content,
+            branch: self.current_branch(),
             info: (),
         }
     }
@@ -394,17 +406,26 @@ impl SongContext {
             },
         )
     }
-    fn terminate_renda(parser_state: &mut ParserState) -> Option<Note> {
+    fn terminate_renda(parser_state: &mut ParserState, branch: Option<BranchType>) -> Option<Note> {
         if let Some(RendaBuffer(scroll_speed, time, mut content)) = parser_state.renda.take() {
             content.end_time = parser_state.time;
             Some(Note {
                 scroll_speed,
                 time,
                 content: NoteContent::Renda(content),
+                branch,
                 info: (),
             })
         } else {
             None
+        }
+    }
+
+    fn current_branch(&self) -> Option<BranchType> {
+        match &self.branch_context {
+            BranchContext::Outside | BranchContext::Started => None,
+            BranchContext::First(c) => Some(c.branch_type),
+            BranchContext::Subsequent(c) | BranchContext::Duplicate(c) => Some(c.branch_type),
         }
     }
 
@@ -441,6 +462,7 @@ impl SongContext {
                     end_state: self.parser_state.clone(),
                     shared_elements: context.shared_elements,
                     measure_index: 0,
+                    filled_branch: EnumMap::new(),
                 };
                 self.branch_switch_subseqent(branch_type, context)
             }
@@ -458,8 +480,13 @@ impl SongContext {
     ) -> BranchContext {
         // measure & bpm cannot be used
         self.parser_state = context.initial_state.clone();
+        context.branch_type = branch_type;
         context.measure_index = 0;
-        BranchContext::Subsequent(context)
+        if std::mem::replace(&mut context.filled_branch[branch_type], true) {
+            BranchContext::Duplicate(context)
+        } else {
+            BranchContext::Subsequent(context)
+        }
     }
 
     fn branch_end(&mut self) {
@@ -517,7 +544,11 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                 .next()
                 .expect("Unexpected: split() must have one element");
             if line.starts_with("#END") {
-                if let Some(context) = song_context.take() {
+                if let Some(mut context) = song_context.take() {
+                    context
+                        .score
+                        .notes
+                        .sort_by_key(|e| OrderedFloat::from(e.time));
                     song.score = Some(context.score);
                     break 'lines;
                 }
