@@ -165,6 +165,7 @@ enum BranchContext {
 struct FirstBranchContext {
     branch_type: BranchType,
     initial_state: ParserState,
+    shared_elements: Vec<(usize, Vec<(usize, TjaElement)>)>,
 }
 
 #[derive(Debug)]
@@ -172,6 +173,8 @@ struct SubsequentBranchContext {
     branch_type: BranchType,
     initial_state: ParserState,
     end_state: ParserState,
+    shared_elements: Vec<(usize, Vec<(usize, TjaElement)>)>,
+    measure_index: usize,
 }
 
 impl SongContext {
@@ -195,6 +198,8 @@ impl SongContext {
         }
     }
     fn terminate_measure(&mut self) -> Result<(), TjaError> {
+        // println!("    terminate_measure: {:?}", self.elements);
+
         let notes_count = self
             .elements
             .iter()
@@ -203,11 +208,65 @@ impl SongContext {
         if notes_count == 0 {
             self.elements.push(TjaElement::NoteChar('0'));
         }
-        let notes_count = max(1, notes_count) as f64;
-        let mut first_note = true;
+        let notes_count = max(1, notes_count);
+
+        let (parse_notes, parse_bpm) = match &self.branch_context {
+            BranchContext::Outside => (true, true),
+            BranchContext::Started => {
+                eprintln!(
+                    "Warning: elements between #BRANCHSTART and first #N, #E or #M is deprecated."
+                );
+                eprintln!("The commands will be accepted, while the notes will be ignored.");
+                (false, true)
+            }
+            BranchContext::First(context) => (true, true),
+            BranchContext::Subsequent(context) => {
+                if context.measure_index < context.shared_elements.len() {
+                    (true, false)
+                } else {
+                    eprintln!("Warning: the number of measures in this branch exceeded that of the first one.");
+                    eprintln!("The commands will be accepted, while the notes will be ignored.");
+                    (false, true)
+                }
+            }
+            BranchContext::Duplicate(_) => {
+                self.elements.clear();
+                return Ok(());
+            }
+        };
+
+        if let BranchContext::First(context) = &mut self.branch_context {
+            context.shared_elements.push((notes_count, Vec::new()));
+        }
+
+        let mut note_index = 0;
+        let mut shared_elements_index = 0;
         for element in self.elements.iter() {
+            if let BranchContext::Subsequent(context) = &mut self.branch_context {
+                if let Some((total, shared_elements)) =
+                    &context.shared_elements.get(context.measure_index)
+                {
+                    for (_, element) in
+                        shared_elements[shared_elements_index..]
+                            .iter()
+                            .take_while(|(i, _)| {
+                                // i / total <= note_index / notes_count
+                                i.saturating_mul(notes_count) <= total.saturating_mul(note_index)
+                            })
+                    {
+                        // TODO duplicate
+                        match element {
+                            TjaElement::BpmChange(bpm) => self.bpm = Bpm(*bpm),
+                            TjaElement::Measure(a, b) => self.measure = Measure(*a, *b),
+                            TjaElement::Delay(delay) => self.parser_state.time += delay,
+                            _ => {}
+                        }
+                        shared_elements_index += 1;
+                    }
+                }
+            }
             match element {
-                TjaElement::NoteChar(c) => {
+                TjaElement::NoteChar(c) if parse_notes => {
                     if let Some(note) = match c {
                         '0' => None,
                         '1' => Some(self.note(false, false)),
@@ -259,25 +318,42 @@ impl SongContext {
                     } {
                         self.score.notes.push(note);
                     }
-                    if first_note {
-                        first_note = false;
+                    if note_index == 0 {
                         self.score.bar_lines.push(BarLine {
                             scroll_speed: self.scroll_speed(),
                             time: self.parser_state.time,
                             visible: self.parser_state.bar_line,
                         });
                     }
-                    self.parser_state.time +=
-                        self.measure.get_beat_count() * self.bpm.get_beat_duration() / notes_count;
+                    note_index += 1;
+                    self.parser_state.time += self.measure.get_beat_count()
+                        * self.bpm.get_beat_duration()
+                        / notes_count as f64;
                 }
-                TjaElement::BpmChange(bpm) => self.bpm = Bpm(*bpm),
+                TjaElement::BpmChange(bpm) if parse_bpm => self.bpm = Bpm(*bpm),
                 TjaElement::Gogo(gogo) => self.parser_state.gogo = *gogo,
-                TjaElement::Measure(a, b) => self.measure = Measure(*a, *b),
+                TjaElement::Measure(a, b) if parse_bpm => self.measure = Measure(*a, *b),
                 TjaElement::Scroll(scroll) => self.parser_state.hs = *scroll,
-                TjaElement::Delay(delay) => self.parser_state.time += delay,
+                TjaElement::Delay(delay) if parse_bpm => self.parser_state.time += delay,
                 TjaElement::BarLine(bar) => self.parser_state.bar_line = *bar,
+                _ => {
+                    // Element was ignored due to illegal syntax in the tja file
+                }
+            }
+            if let BranchContext::First(context) = &mut self.branch_context {
+                if matches!(
+                    element,
+                    TjaElement::BpmChange(..) | TjaElement::Measure(..) | TjaElement::Delay(..)
+                ) {
+                    context.shared_elements.last_mut().unwrap().1.push((note_index, element.clone()));
+                }
             }
         }
+
+        if let BranchContext::Subsequent(context) = &mut self.branch_context {
+            context.measure_index += 1
+        }
+
         self.elements.clear();
         Ok(())
     }
@@ -356,12 +432,15 @@ impl SongContext {
             BranchContext::Started => BranchContext::First(FirstBranchContext {
                 branch_type,
                 initial_state: self.parser_state.clone(),
+                shared_elements: Vec::new(),
             }),
             BranchContext::First(context) => {
                 let context = SubsequentBranchContext {
                     branch_type,
                     initial_state: context.initial_state,
                     end_state: self.parser_state.clone(),
+                    shared_elements: context.shared_elements,
+                    measure_index: 0,
                 };
                 self.branch_switch_subseqent(branch_type, context)
             }
@@ -369,15 +448,17 @@ impl SongContext {
                 self.branch_switch_subseqent(branch_type, context)
             }
         };
+        // println!("{:?} {:?}", branch_type, &self.branch_context);
     }
 
     fn branch_switch_subseqent(
         &mut self,
         branch_type: BranchType,
-        context: SubsequentBranchContext,
+        mut context: SubsequentBranchContext,
     ) -> BranchContext {
         // measure & bpm cannot be used
         self.parser_state = context.initial_state.clone();
+        context.measure_index = 0;
         BranchContext::Subsequent(context)
     }
 
@@ -401,7 +482,7 @@ impl SongContext {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum TjaElement {
     NoteChar(char),
     BpmChange(f64),
@@ -481,7 +562,7 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                 .iter()
                 .any(|s| line.starts_with(s))
             {
-                eprintln!("branches are not implemented");
+                eprintln!("#SECTION and #LEVELHOLD is not implemented");
             } else if line.starts_with("#BARLINEON") {
                 context.elements.push(TjaElement::BarLine(true));
             } else if line.starts_with("#BARLINEOFF") {
