@@ -84,7 +84,11 @@ impl GameState {
         }
     }
 
-    fn update_with_judge<J: Into<JudgeOrPassed>>(&mut self, note: &mut SingleNote<OfGameState>, judge: J) {
+    fn update_with_judge<J: Into<JudgeOrPassed>>(
+        &mut self,
+        note: &mut SingleNote<OfGameState>,
+        judge: J,
+    ) {
         let judge = judge.into();
         let was_none = note.info.judge.is_none();
         note.info.judge = Some(judge);
@@ -204,7 +208,11 @@ impl<'a> GameManager<'a> {
         ];
         GameManager {
             score,
-            notes: score.notes.iter().map(|note| Note::new(note, &gauge_delta)).collect_vec(),
+            notes: score
+                .notes
+                .iter()
+                .map(|note| Note::new(note, &gauge_delta))
+                .collect_vec(),
 
             auto: false,
 

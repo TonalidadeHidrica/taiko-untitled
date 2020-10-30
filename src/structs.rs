@@ -32,7 +32,7 @@ pub mod typed {
         Renda(RendaContent<T>),
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct SingleNote<T: NoteInfo> {
         pub kind: SingleNoteKind,
         pub info: T::SingleNote,
@@ -51,18 +51,21 @@ pub mod typed {
         Quota(QuotaRenda<T>),
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct UnlimitedRenda<T: NoteInfo> {
         pub size: NoteSize,
         pub info: T::UnlimitedRenda,
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct QuotaRenda<T: NoteInfo> {
         pub kind: QuotaRendaKind,
         pub quota: u64,
         pub info: T::QuotaRenda,
     }
+
+    // impl <T: NoteInfo> Copy for QuotaRenda<T> where T::QuotaRenda: Copy {
+    // }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -76,25 +79,25 @@ pub enum Level {
     Oni,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SingleNoteKind {
     pub color: NoteColor,
     pub size: NoteSize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteColor {
     Don,
     Ka,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum NoteSize {
     Small,
     Large,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum QuotaRendaKind {
     Balloon,
     Potato,
@@ -115,13 +118,20 @@ impl Measure {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Bpm(pub f64);
 
 impl Bpm {
     pub fn get_beat_duration(&self) -> f64 {
         60.0 / self.0
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BranchType {
+    Normal,
+    Expert,
+    Master,
 }
 
 macro_rules! define_types {

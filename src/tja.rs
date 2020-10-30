@@ -121,38 +121,76 @@ pub fn load_tja_from_file<P: AsRef<Path>>(path: P) -> Result<Song, TjaError> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct RendaBuffer(Bpm, f64, RendaContent);
 
 #[derive(Debug)]
 struct SongContext {
     player: Player,
     score: Score,
+
+    // elements buffer in current measure
     elements: Vec<TjaElement>,
-    time: f64,
+
+    branch_context: BranchContext,
+    // Should be not overwritten while reading subsequent branches
     measure: Measure,
     bpm: Bpm,
+    // Should be restored after branch ends
+    parser_state: ParserState,
+
+    balloons: VecDeque<u64>,
+}
+
+#[derive(Clone, Debug)]
+struct ParserState {
+    time: f64,
+    // Independent
     hs: f64,
     bar_line: bool,
     gogo: bool,
     renda: Option<RendaBuffer>,
-    balloons: VecDeque<u64>,
+}
+
+#[derive(Debug)]
+enum BranchContext {
+    Outside,
+    Started,
+    First(FirstBranchContext),
+    Subsequent(SubsequentBranchContext),
+    Duplicate(SubsequentBranchContext),
+}
+
+#[derive(Debug)]
+struct FirstBranchContext {
+    branch_type: BranchType,
+    initial_state: ParserState,
+}
+
+#[derive(Debug)]
+struct SubsequentBranchContext {
+    branch_type: BranchType,
+    initial_state: ParserState,
+    end_state: ParserState,
 }
 
 impl SongContext {
     fn new(song: &Song) -> SongContext {
-        let (player, elements, measure, renda) = Default::default();
+        let (player, elements, measure) = Default::default();
         SongContext {
             player,
             score: Score::default(),
             elements,
-            time: -song.offset,
+            branch_context: BranchContext::Outside,
             measure,
             bpm: Bpm(song.bpm),
-            hs: 1.0,
-            bar_line: true,
-            gogo: false,
-            renda,
+            parser_state: ParserState {
+                hs: 1.0,
+                bar_line: true,
+                gogo: false,
+                renda: None,
+                time: -song.offset,
+            },
             balloons: song.balloons.iter().copied().collect(),
         }
     }
@@ -177,36 +215,40 @@ impl SongContext {
                         '3' => Some(self.note(false, true)),
                         '4' => Some(self.note(true, true)),
                         '5' => {
-                            self.renda = Some(self.renda(RendaKind::Unlimited(UnlimitedRenda {
-                                size: NoteSize::Small,
-                                info: (),
-                            })));
+                            self.parser_state.renda =
+                                Some(self.renda(RendaKind::Unlimited(UnlimitedRenda {
+                                    size: NoteSize::Small,
+                                    info: (),
+                                })));
                             None
                         }
                         '6' => {
-                            self.renda = Some(self.renda(RendaKind::Unlimited(UnlimitedRenda {
-                                size: NoteSize::Large,
-                                info: (),
-                            })));
+                            self.parser_state.renda =
+                                Some(self.renda(RendaKind::Unlimited(UnlimitedRenda {
+                                    size: NoteSize::Large,
+                                    info: (),
+                                })));
                             None
                         }
                         '7' => {
                             let quota = self.balloons.pop_front().unwrap_or(5);
-                            self.renda = Some(self.renda(RendaKind::Quota(QuotaRenda {
-                                kind: QuotaRendaKind::Balloon,
-                                quota,
-                                info: (),
-                            })));
+                            self.parser_state.renda =
+                                Some(self.renda(RendaKind::Quota(QuotaRenda {
+                                    kind: QuotaRendaKind::Balloon,
+                                    quota,
+                                    info: (),
+                                })));
                             None
                         }
-                        '8' => Self::terminate_renda(self.time, &mut self.renda),
+                        '8' => Self::terminate_renda(&mut self.parser_state),
                         '9' => {
                             let quota = self.balloons.pop_front().unwrap_or(5);
-                            self.renda = Some(self.renda(RendaKind::Quota(QuotaRenda {
-                                kind: QuotaRendaKind::Potato,
-                                quota,
-                                info: (),
-                            })));
+                            self.parser_state.renda =
+                                Some(self.renda(RendaKind::Quota(QuotaRenda {
+                                    kind: QuotaRendaKind::Potato,
+                                    quota,
+                                    info: (),
+                                })));
                             None
                         }
                         _ => {
@@ -221,30 +263,30 @@ impl SongContext {
                         first_note = false;
                         self.score.bar_lines.push(BarLine {
                             scroll_speed: self.scroll_speed(),
-                            time: self.time,
-                            visible: self.bar_line,
+                            time: self.parser_state.time,
+                            visible: self.parser_state.bar_line,
                         });
                     }
-                    self.time +=
+                    self.parser_state.time +=
                         self.measure.get_beat_count() * self.bpm.get_beat_duration() / notes_count;
                 }
                 TjaElement::BpmChange(bpm) => self.bpm = Bpm(*bpm),
-                TjaElement::Gogo(gogo) => self.gogo = *gogo,
+                TjaElement::Gogo(gogo) => self.parser_state.gogo = *gogo,
                 TjaElement::Measure(a, b) => self.measure = Measure(*a, *b),
-                TjaElement::Scroll(scroll) => self.hs = *scroll,
-                TjaElement::Delay(delay) => self.time += delay,
-                TjaElement::BarLine(bar) => self.bar_line = *bar,
+                TjaElement::Scroll(scroll) => self.parser_state.hs = *scroll,
+                TjaElement::Delay(delay) => self.parser_state.time += delay,
+                TjaElement::BarLine(bar) => self.parser_state.bar_line = *bar,
             }
         }
         self.elements.clear();
         Ok(())
     }
     fn scroll_speed(&self) -> Bpm {
-        Bpm(self.bpm.0 * self.hs)
+        Bpm(self.bpm.0 * self.parser_state.hs)
     }
     fn with_scroll_speed(&self, note_content: NoteContent) -> Note {
         Note {
-            time: self.time,
+            time: self.parser_state.time,
             scroll_speed: self.scroll_speed(),
             content: note_content,
             info: (),
@@ -268,17 +310,17 @@ impl SongContext {
     fn renda(&self, kind: RendaKind) -> RendaBuffer {
         RendaBuffer(
             self.scroll_speed(),
-            self.time,
+            self.parser_state.time,
             RendaContent {
-                end_time: self.time,
+                end_time: self.parser_state.time,
                 kind,
                 info: (),
             },
         )
     }
-    fn terminate_renda(end_time: f64, renda: &mut Option<RendaBuffer>) -> Option<Note> {
-        if let Some(RendaBuffer(scroll_speed, time, mut content)) = renda.take() {
-            content.end_time = end_time;
+    fn terminate_renda(parser_state: &mut ParserState) -> Option<Note> {
+        if let Some(RendaBuffer(scroll_speed, time, mut content)) = parser_state.renda.take() {
+            content.end_time = parser_state.time;
             Some(Note {
                 scroll_speed,
                 time,
@@ -287,6 +329,74 @@ impl SongContext {
             })
         } else {
             None
+        }
+    }
+
+    fn branch_start(&mut self, branch_condition: &str) {
+        // TODO measure cleanup
+        if !matches!(self.branch_context, BranchContext::Outside) {
+            eprintln!("#BRANCHSTART was found before branch ends.");
+            self.branch_end();
+        }
+        self.branch_context = BranchContext::Started;
+        // TODO branch condition
+    }
+
+    fn branch_switch(&mut self, branch_type: BranchType) {
+        // TODO measure cleanup
+        let branch_context = std::mem::replace(&mut self.branch_context, BranchContext::Outside);
+        self.branch_context = match branch_context {
+            current @ BranchContext::Outside => {
+                eprintln!(
+                    "Cannot start branch {:?} outside #BRANCHSTART and END",
+                    branch_type
+                );
+                current
+            }
+            BranchContext::Started => BranchContext::First(FirstBranchContext {
+                branch_type,
+                initial_state: self.parser_state.clone(),
+            }),
+            BranchContext::First(context) => {
+                let context = SubsequentBranchContext {
+                    branch_type,
+                    initial_state: context.initial_state,
+                    end_state: self.parser_state.clone(),
+                };
+                self.branch_switch_subseqent(branch_type, context)
+            }
+            BranchContext::Subsequent(context) | BranchContext::Duplicate(context) => {
+                self.branch_switch_subseqent(branch_type, context)
+            }
+        };
+    }
+
+    fn branch_switch_subseqent(
+        &mut self,
+        branch_type: BranchType,
+        context: SubsequentBranchContext,
+    ) -> BranchContext {
+        // measure & bpm cannot be used
+        self.parser_state = context.initial_state.clone();
+        BranchContext::Subsequent(context)
+    }
+
+    fn branch_end(&mut self) {
+        // TODO measure cleanup
+        match std::mem::replace(&mut self.branch_context, BranchContext::Outside) {
+            BranchContext::Outside => {
+                eprintln!("#BRANCHEND found before #BRANCHSTART");
+            }
+            BranchContext::Started => {
+                eprintln!("Warning: None of #N, #E, #M was found between #BRANCHTSTART and END");
+            }
+            BranchContext::First(_) => {
+                // No need to restore parser_state
+            }
+            BranchContext::Subsequent(context) | BranchContext::Duplicate(context) => {
+                self.parser_state = context.end_state;
+                // TODO should parser state be stored individually for different branches?
+            }
         }
     }
 }
@@ -357,9 +467,17 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                     eprintln!("Delay is deprecated, so it may not work properly.");
                     context.elements.push(TjaElement::Delay(delay));
                 }
-            } else if let Some(_) = take_remaining("#BRANCHSTART", line) {
-                eprintln!("branches are not implemented");
-            } else if ["#SECTION", "#N", "#E", "#M", "#LEVELHOLD"]
+            } else if let Some(branch_condition) = take_remaining("#BRANCHSTART", line) {
+                context.branch_start(branch_condition);
+            } else if line.starts_with("#BRANCHEND") {
+                context.branch_end();
+            } else if line.starts_with("#N") {
+                context.branch_switch(BranchType::Normal);
+            } else if line.starts_with("#E") {
+                context.branch_switch(BranchType::Expert);
+            } else if line.starts_with("#M") {
+                context.branch_switch(BranchType::Master);
+            } else if ["#SECTION", "#LEVELHOLD"]
                 .iter()
                 .any(|s| line.starts_with(s))
             {
@@ -480,22 +598,6 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
             }
         }
     }
-    // for note in &song.score.as_ref().unwrap().notes[..] {
-    //     if let NoteContent::Normal {
-    //         ref color,
-    //         ref size,
-    //         ref time,
-    //     } = note.content
-    //     {
-    //         println!(
-    //             "{}\t{}\t{}\t{}",
-    //             time,
-    //             note.scroll_speed.0,
-    //             matches!(color, NoteColor::Don),
-    //             matches!(size, NoteSize::Large)
-    //         );
-    //     }
-    // }
     Ok(song)
 }
 
