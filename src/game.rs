@@ -18,6 +18,7 @@ impl typed::NoteInfo for OfGameState {
     type RendaContent = RendaState;
     type UnlimitedRenda = ();
     type QuotaRenda = QuotaRendaState;
+    type Branch = ();
 }
 
 #[derive(Default, Debug, Clone)]

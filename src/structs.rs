@@ -10,6 +10,7 @@ pub mod typed {
         type RendaContent: Debug + Clone;
         type UnlimitedRenda: Debug + Clone;
         type QuotaRenda: Debug + Clone;
+        type Branch: Debug + Clone;
     }
 
     impl NoteInfo for () {
@@ -18,6 +19,7 @@ pub mod typed {
         type RendaContent = ();
         type UnlimitedRenda = ();
         type QuotaRenda = ();
+        type Branch = ();
     }
 
     #[derive(Clone, Debug)]
@@ -67,8 +69,13 @@ pub mod typed {
         pub info: T::QuotaRenda,
     }
 
-    // impl <T: NoteInfo> Copy for QuotaRenda<T> where T::QuotaRenda: Copy {
-    // }
+    #[derive(Clone, Copy, Debug)]
+    pub struct Branch<T: NoteInfo> {
+        pub time: f64,
+        pub scroll_speed: Bpm,
+        pub condition: BranchCondition,
+        pub info: T::Branch,
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -104,6 +111,14 @@ pub enum NoteSize {
 pub enum QuotaRendaKind {
     Balloon,
     Potato,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BranchCondition {
+    Pass,
+    Renda(u64, u64),
+    Precision(f64, f64),
+    Score(u64, u64),
 }
 
 #[derive(Debug)]
@@ -146,6 +161,7 @@ macro_rules! define_types {
         pub type RendaKind = super::typed::RendaKind<$ty>;
         pub type UnlimitedRenda = super::typed::UnlimitedRenda<$ty>;
         pub type QuotaRenda = super::typed::QuotaRenda<$ty>;
+        pub type Branch = super::typed::Branch<$ty>;
     };
 }
 

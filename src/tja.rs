@@ -53,6 +53,7 @@ pub struct Song {
 pub struct Score {
     pub notes: Vec<Note>,
     pub bar_lines: Vec<BarLine>,
+    pub branches: Vec<Branch>,
 }
 
 #[derive(Debug)]
@@ -429,14 +430,68 @@ impl SongContext {
         }
     }
 
+    fn parse_branch_condition(branch_condition: &str) -> Result<BranchCondition, ()> {
+        #[derive(Debug)]
+        enum T {
+            R,
+            S,
+            P,
+        }
+        let (i, t) = branch_condition
+            .find(&['r', 'R'][..])
+            .map(|i| (i, T::R))
+            .unwrap_or_else(|| {
+                branch_condition
+                    .find(&['s', 'S'][..])
+                    .map(|i| (i, T::S))
+                    .unwrap_or((0, T::P))
+            });
+        let branch_condition = &branch_condition[i..];
+        let i = match branch_condition.find(',') {
+            Some(i) => i + 1,
+            None => return Err(()),
+        };
+        let ret = match &branch_condition[i..].splitn(2, ',').collect_vec()[..] {
+            [_] => return Err(()),
+            [x, y] => match t {
+                T::R => {
+                    BranchCondition::Renda(x.parse_first().ok_or(())?, y.parse_first().ok_or(())?)
+                }
+                T::S => {
+                    BranchCondition::Score(x.parse_first().ok_or(())?, y.parse_first().ok_or(())?)
+                }
+                T::P => BranchCondition::Precision(
+                    x.parse_first().ok_or(())?,
+                    y.parse_first().ok_or(())?,
+                ),
+            },
+            _ => unreachable!(),
+        };
+        Ok(ret)
+    }
+
     fn branch_start(&mut self, branch_condition: &str) {
         // TODO measure cleanup
+
+        let condition = match Self::parse_branch_condition(branch_condition) {
+            Ok(c) => c,
+            Err(..) => {
+                eprintln!("Invalid branch condition: {:?}", branch_condition);
+                BranchCondition::Pass
+            }
+        };
+        self.score.branches.push(Branch {
+            time: self.parser_state.time,
+            scroll_speed: self.scroll_speed(),
+            condition,
+            info: (),
+        });
+
         if !matches!(self.branch_context, BranchContext::Outside) {
             eprintln!("#BRANCHSTART was found before branch ends.");
             self.branch_end();
         }
         self.branch_context = BranchContext::Started;
-        // TODO branch condition
     }
 
     fn branch_switch(&mut self, branch_type: BranchType) {

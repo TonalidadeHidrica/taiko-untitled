@@ -248,6 +248,24 @@ fn main() -> Result<(), TaikoError> {
                 .fill_rects(&rects[..])
                 .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
 
+            // Draw branch lines
+            // TODO duplicate
+            let rects = score
+                .branches
+                .iter()
+                .filter_map(|bar_line| {
+                    let x = get_x(music_position, bar_line.time, &bar_line.scroll_speed) as i32;
+                    if 0 <= x && x <= 2000 {
+                        return Some(Rect::new(x + 96, 288, 3, 195));
+                    }
+                    None
+                })
+                .collect_vec();
+            canvas.set_draw_color(Color::RGB(0xf3, 0xff, 0x55));
+            canvas
+                .fill_rects(&rects[..])
+                .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
+
             // draw notes
             for note in game_manager.notes().iter().rev() {
                 match &note.content {
