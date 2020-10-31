@@ -4,7 +4,7 @@ pub mod typed {
     use super::*;
     use std::fmt::Debug;
 
-    pub trait NoteInfo {
+    pub trait AdditionalInfo {
         type Note: Debug + Clone;
         type SingleNote: Debug + Clone;
         type RendaContent: Debug + Clone;
@@ -13,7 +13,7 @@ pub mod typed {
         type Branch: Debug + Clone;
     }
 
-    impl NoteInfo for () {
+    impl AdditionalInfo for () {
         type Note = ();
         type SingleNote = ();
         type RendaContent = ();
@@ -22,8 +22,15 @@ pub mod typed {
         type Branch = ();
     }
 
+    #[derive(Default, Debug)]
+    pub struct Score<T: AdditionalInfo> {
+        pub notes: Vec<Note<T>>,
+        pub bar_lines: Vec<BarLine>,
+        pub branches: Vec<Branch<T>>,
+    }
+
     #[derive(Clone, Debug)]
-    pub struct Note<T: NoteInfo> {
+    pub struct Note<T: AdditionalInfo> {
         pub scroll_speed: Bpm,
         pub time: f64,
         pub content: NoteContent<T>,
@@ -32,49 +39,60 @@ pub mod typed {
     }
 
     #[derive(Clone, Debug)]
-    pub enum NoteContent<T: NoteInfo> {
+    pub enum NoteContent<T: AdditionalInfo> {
         Single(SingleNote<T>),
         Renda(RendaContent<T>),
     }
 
     #[derive(Clone, Copy, Debug)]
-    pub struct SingleNote<T: NoteInfo> {
+    pub struct SingleNote<T: AdditionalInfo> {
         pub kind: SingleNoteKind,
         pub info: T::SingleNote,
     }
 
     #[derive(Clone, Debug)]
-    pub struct RendaContent<T: NoteInfo> {
+    pub struct RendaContent<T: AdditionalInfo> {
         pub kind: RendaKind<T>,
         pub end_time: f64,
         pub info: T::RendaContent,
     }
 
     #[derive(Clone, Debug)]
-    pub enum RendaKind<T: NoteInfo> {
+    pub enum RendaKind<T: AdditionalInfo> {
         Unlimited(UnlimitedRenda<T>),
         Quota(QuotaRenda<T>),
     }
 
     #[derive(Clone, Copy, Debug)]
-    pub struct UnlimitedRenda<T: NoteInfo> {
+    pub struct UnlimitedRenda<T: AdditionalInfo> {
         pub size: NoteSize,
         pub info: T::UnlimitedRenda,
     }
 
     #[derive(Clone, Copy, Debug)]
-    pub struct QuotaRenda<T: NoteInfo> {
+    pub struct QuotaRenda<T: AdditionalInfo> {
         pub kind: QuotaRendaKind,
         pub quota: u64,
         pub info: T::QuotaRenda,
     }
 
     #[derive(Clone, Copy, Debug)]
-    pub struct Branch<T: NoteInfo> {
+    pub struct Branch<T: AdditionalInfo> {
         pub time: f64,
         pub scroll_speed: Bpm,
         pub condition: BranchCondition,
         pub info: T::Branch,
+    }
+
+    impl<T: AdditionalInfo> Branch<T> {
+        pub fn with_info<U: AdditionalInfo>(&self, info: U::Branch) -> Branch<U> {
+            Branch {
+                time: self.time,
+                scroll_speed: self.scroll_speed,
+                condition: self.condition,
+                info,
+            }
+        }
     }
 }
 
@@ -121,8 +139,15 @@ pub enum BranchCondition {
     Score(u64, u64),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Measure(pub f64, pub f64);
+
+#[derive(Clone, Copy, Debug)]
+pub struct BarLine {
+    pub time: f64,
+    pub scroll_speed: Bpm,
+    pub visible: bool,
+}
 
 impl Default for Measure {
     fn default() -> Self {
@@ -145,7 +170,7 @@ impl Bpm {
     }
 }
 
-#[derive(Clone, Copy, Debug, Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Enum)]
 pub enum BranchType {
     Normal,
     Expert,
@@ -154,6 +179,7 @@ pub enum BranchType {
 
 macro_rules! define_types {
     ($ty: ty) => {
+        pub type Score = super::typed::Score<$ty>;
         pub type Note = super::typed::Note<$ty>;
         pub type NoteContent = super::typed::NoteContent<$ty>;
         pub type SingleNote = super::typed::SingleNote<$ty>;

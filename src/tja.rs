@@ -49,20 +49,6 @@ pub struct Song {
     pub score: Option<Score>, // will later be Vec<Score>
 }
 
-#[derive(Default, Debug)]
-pub struct Score {
-    pub notes: Vec<Note>,
-    pub bar_lines: Vec<BarLine>,
-    pub branches: Vec<Branch>,
-}
-
-#[derive(Debug)]
-pub struct BarLine {
-    pub time: f64,
-    pub scroll_speed: Bpm,
-    pub visible: bool,
-}
-
 impl Default for Song {
     fn default() -> Self {
         let (title, subtitle, wave, offset, balloons, score) = Default::default();
@@ -319,9 +305,7 @@ impl SongContext {
                             None
                         }
                         _ => {
-                            unreachable!(
-                                "NoteChar must contain characters between '0' and '9'",
-                            );
+                            unreachable!("NoteChar must contain characters between '0' and '9'",);
                         }
                     } {
                         self.score.notes.push(note);

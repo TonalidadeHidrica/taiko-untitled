@@ -19,7 +19,7 @@ use taiko_untitled::errors::{
 use taiko_untitled::game::{GameManager, Judge};
 use taiko_untitled::structs::{
     typed::{NoteContent, RendaContent, RendaKind},
-    Bpm, NoteColor, NoteSize, SingleNoteKind,
+    Bpm, NoteColor, NoteSize, SingleNoteKind, BranchType,
 };
 use taiko_untitled::tja::{load_tja_from_file, Song};
 
@@ -267,7 +267,17 @@ fn main() -> Result<(), TaikoError> {
                 .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
 
             // draw notes
-            for note in game_manager.notes().iter().rev() {
+            let mut branches = game_manager.score.branches.iter().rev().peekable();
+            for note in game_manager.score.notes.iter().rev() {
+                branches
+                    .peeking_take_while(|t| {
+                        note.time < t.time || t.info.determined_branch.is_none()
+                    })
+                    .for_each(|_| {});
+                let branch = branches.peek().and_then(|b| b.info.determined_branch).unwrap_or(BranchType::Normal);
+                if note.branch.map_or(false, |b| b != branch) {
+                    continue;
+                }
                 match &note.content {
                     NoteContent::Single(single_note) if single_note.info.visible() => {
                         let x = get_x(music_position, note.time, &note.scroll_speed);

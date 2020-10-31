@@ -1,8 +1,7 @@
 use crate::structs::{
-    typed::{NoteContent, QuotaRenda, RendaContent, RendaKind, SingleNote, UnlimitedRenda},
+    typed::{NoteContent, QuotaRenda, RendaContent, RendaKind, Score, SingleNote, UnlimitedRenda},
     *,
 };
-use crate::tja::Score;
 use enum_map::{enum_map, Enum, EnumMap};
 use itertools::Itertools;
 use num::clamp;
@@ -12,13 +11,13 @@ use std::convert::Infallible;
 #[derive(Debug)]
 pub struct OfGameState(Infallible);
 
-impl typed::NoteInfo for OfGameState {
+impl typed::AdditionalInfo for OfGameState {
     type Note = ();
     type SingleNote = SingleNoteInfo;
     type RendaContent = RendaState;
     type UnlimitedRenda = ();
     type QuotaRenda = QuotaRendaState;
-    type Branch = ();
+    type Branch = BranchState;
 }
 
 #[derive(Default, Debug, Clone)]
@@ -42,6 +41,11 @@ pub struct QuotaRendaState {
     pub finished: bool,
 }
 
+#[derive(Default, Debug, Clone)]
+pub struct BranchState {
+    pub determined_branch: Option<BranchType>,
+}
+
 impl SingleNote<OfGameState> {
     fn corresponds(&self, color: &Option<NoteColor>) -> bool {
         color.as_ref().map_or(false, |c| &self.kind.color == c)
@@ -51,10 +55,8 @@ impl SingleNote<OfGameState> {
 // TODO use define_types macro
 pub type Note = typed::Note<OfGameState>;
 
-pub struct GameManager<'a> {
-    #[allow(dead_code)]
-    score: &'a Score,
-    notes: Vec<Note>,
+pub struct GameManager {
+    pub score: Score<OfGameState>,
 
     auto: bool,
 
@@ -191,8 +193,8 @@ const GOOD_WINDOW: f64 = 25.0250015258789 / 1000.0;
 const OK_WINDOW: f64 = 75.0750045776367 / 1000.0;
 const BAD_WINDOW: f64 = 108.441665649414 / 1000.0;
 
-impl<'a> GameManager<'a> {
-    pub fn new(score: &'a Score) -> Self {
+impl GameManager {
+    pub fn new(score: &Score<()>) -> Self {
         let combo_count = score
             .notes
             .iter()
@@ -208,13 +210,20 @@ impl<'a> GameManager<'a> {
             Judge::Ok => (good_delta / 2.0).trunc(),
             Judge::Bad => -good_delta * 2.0,
         ];
-        GameManager {
-            score,
-            notes: score
-                .notes
-                .iter()
-                .map(|note| Note::new(note, &gauge_delta))
-                .collect_vec(),
+        Self {
+            score: Score {
+                notes: score
+                    .notes
+                    .iter()
+                    .map(|note| Note::new(note, &gauge_delta))
+                    .collect_vec(),
+                bar_lines: score.bar_lines.clone(),
+                branches: score
+                    .branches
+                    .iter()
+                    .map(|b| b.with_info(BranchState::default()))
+                    .collect_vec(),
+            },
 
             auto: false,
 
@@ -236,88 +245,86 @@ impl<'a> GameManager<'a> {
         self.auto
     }
 
-    pub fn notes(&self) -> &[Note] {
-        &self.notes
-    }
-
     pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
         let game_state = &mut self.game_state;
         let animation_state = &mut self.animation_state;
-        let _ = check_on_timeline(&mut self.notes, &mut self.judge_pointer, |note| match note
-            .content
-        {
-            NoteContent::Single(ref mut single_note) => match note.time - time {
-                t if t.abs() <= OK_WINDOW => {
-                    if single_note.info.judge.is_none() && single_note.corresponds(&color) {
-                        let judge = if t.abs() <= GOOD_WINDOW {
-                            Judge::Good
-                        } else {
-                            Judge::Ok
-                        };
+        let _ = check_on_timeline(
+            &mut self.score.notes,
+            &mut self.judge_pointer,
+            |note| match note.content {
+                NoteContent::Single(ref mut single_note) => match note.time - time {
+                    t if t.abs() <= OK_WINDOW => {
+                        if single_note.info.judge.is_none() && single_note.corresponds(&color) {
+                            let judge = if t.abs() <= GOOD_WINDOW {
+                                Judge::Good
+                            } else {
+                                Judge::Ok
+                            };
 
-                        game_state.update_with_judge(single_note, judge);
-                        animation_state.flying_notes.push_back(FlyingNote {
-                            time,
-                            kind: single_note.kind.clone(),
-                        });
-                        animation_state
-                            .judge_strs
-                            .push_back(JudgeStr { time, judge });
-                        animation_state.last_combo_update = time;
-
-                        JudgeOnTimeline::BreakWith(())
-                    } else {
-                        JudgeOnTimeline::Continue
-                    }
-                }
-                t if t < 0.0 => {
-                    if single_note.info.judge.is_none() {
-                        game_state.update_with_judge(single_note, JudgeOrPassed::Passed);
-                    }
-                    JudgeOnTimeline::Past
-                }
-                t if t > 0.0 => JudgeOnTimeline::Break,
-                _ => unreachable!(),
-            },
-            NoteContent::Renda(ref mut renda) => match () {
-                _ if note.time <= time && time < renda.end_time => {
-                    match (&mut renda.kind, &color) {
-                        (RendaKind::Unlimited(renda_u), Some(color)) => {
-                            renda.info.count += 1;
+                            game_state.update_with_judge(single_note, judge);
                             animation_state.flying_notes.push_back(FlyingNote {
                                 time,
-                                kind: SingleNoteKind {
-                                    color: color.clone(),
-                                    size: renda_u.size.clone(),
-                                },
+                                kind: single_note.kind.clone(),
                             });
+                            animation_state
+                                .judge_strs
+                                .push_back(JudgeStr { time, judge });
+                            animation_state.last_combo_update = time;
+
+                            JudgeOnTimeline::BreakWith(())
+                        } else {
+                            JudgeOnTimeline::Continue
                         }
-                        (RendaKind::Quota(ref mut renda_q), Some(NoteColor::Don)) => {
-                            if !renda_q.info.finished {
+                    }
+                    t if t < 0.0 => {
+                        if single_note.info.judge.is_none() {
+                            game_state.update_with_judge(single_note, JudgeOrPassed::Passed);
+                        }
+                        JudgeOnTimeline::Past
+                    }
+                    t if t > 0.0 => JudgeOnTimeline::Break,
+                    _ => unreachable!(),
+                },
+                NoteContent::Renda(ref mut renda) => match () {
+                    _ if note.time <= time && time < renda.end_time => {
+                        match (&mut renda.kind, &color) {
+                            (RendaKind::Unlimited(renda_u), Some(color)) => {
                                 renda.info.count += 1;
-                                if renda.info.count >= renda_q.quota {
-                                    renda_q.info.finished = true;
-                                }
                                 animation_state.flying_notes.push_back(FlyingNote {
                                     time,
                                     kind: SingleNoteKind {
-                                        color: NoteColor::Don,
-                                        size: NoteSize::Small,
+                                        color: color.clone(),
+                                        size: renda_u.size.clone(),
                                     },
                                 });
                             }
-                        }
-                        _ => {}
-                    };
-                    JudgeOnTimeline::BreakWith(())
-                }
-                _ if renda.end_time <= time => JudgeOnTimeline::Past,
-                _ if time < note.time => JudgeOnTimeline::Break,
-                _ => unreachable!(),
+                            (RendaKind::Quota(ref mut renda_q), Some(NoteColor::Don)) => {
+                                if !renda_q.info.finished {
+                                    renda.info.count += 1;
+                                    if renda.info.count >= renda_q.quota {
+                                        renda_q.info.finished = true;
+                                    }
+                                    animation_state.flying_notes.push_back(FlyingNote {
+                                        time,
+                                        kind: SingleNoteKind {
+                                            color: NoteColor::Don,
+                                            size: NoteSize::Small,
+                                        },
+                                    });
+                                }
+                            }
+                            _ => {}
+                        };
+                        JudgeOnTimeline::BreakWith(())
+                    }
+                    _ if renda.end_time <= time => JudgeOnTimeline::Past,
+                    _ if time < note.time => JudgeOnTimeline::Break,
+                    _ => unreachable!(),
+                },
             },
-        })
+        )
         .is_some()
-            || check_on_timeline(&mut self.notes, &mut self.judge_bad_pointer, |note| {
+            || check_on_timeline(&mut self.score.notes, &mut self.judge_bad_pointer, |note| {
                 if let NoteContent::Single(ref mut single_note) = note.content {
                     match note.time - time {
                         t if t.abs() <= BAD_WINDOW => {
