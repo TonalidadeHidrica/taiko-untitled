@@ -223,6 +223,7 @@ impl GameManager {
                     .iter()
                     .map(|b| b.with_info(BranchState::default()))
                     .collect_vec(),
+                branch_events: score.branch_events.clone(),
             },
 
             auto: false,

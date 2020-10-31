@@ -27,6 +27,7 @@ pub mod typed {
         pub notes: Vec<Note<T>>,
         pub bar_lines: Vec<BarLine>,
         pub branches: Vec<Branch<T>>,
+        pub branch_events: Vec<BranchEvent>,
     }
 
     #[derive(Clone, Debug)]
@@ -175,6 +176,18 @@ pub enum BranchType {
     Normal,
     Expert,
     Master,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BranchEvent {
+    pub time: f64,
+    pub kind: BranchEventKind,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BranchEventKind {
+    LevelHold(BranchType),
+    Section,
 }
 
 macro_rules! define_types {

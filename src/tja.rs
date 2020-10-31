@@ -548,6 +548,29 @@ impl SongContext {
             }
         }
     }
+
+    fn section(&mut self) {
+        self.push_branch_event(BranchEventKind::Section);
+    }
+
+    fn level_hold(&mut self) {
+        let branch_type = match &self.branch_context {
+            BranchContext::Outside | BranchContext::Started => {
+                eprintln!("#LEVELHOLD before #N, #E or #M is ignored.");
+                return;
+            },
+            BranchContext::First(context) => context.branch_type,
+            BranchContext::Subsequent(context) | BranchContext::Duplicate(context) => context.branch_type,
+        };
+        self.push_branch_event(BranchEventKind::LevelHold(branch_type));
+    }
+
+    fn push_branch_event(&mut self, kind: BranchEventKind) {
+        self.score.branch_events.push(BranchEvent {
+            time: self.parser_state.time,
+            kind
+        });
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -630,11 +653,10 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                 context.branch_switch(BranchType::Expert);
             } else if line.starts_with("#M") {
                 context.branch_switch(BranchType::Master);
-            } else if ["#SECTION", "#LEVELHOLD"]
-                .iter()
-                .any(|s| line.starts_with(s))
-            {
-                eprintln!("#SECTION and #LEVELHOLD is not implemented");
+            } else if line.starts_with("#SECTION") {
+                context.section();
+            } else if line.starts_with("#LEVELHOLD") {
+                context.level_hold();
             } else if line.starts_with("#BARLINEON") {
                 context.elements.push(TjaElement::BarLine(true));
             } else if line.starts_with("#BARLINEOFF") {
