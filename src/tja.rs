@@ -201,7 +201,7 @@ impl SongContext {
             balloons: song.balloons.iter().copied().collect(),
         }
     }
-    fn terminate_measure(&mut self) -> Result<(), TjaError> {
+    fn terminate_measure(&mut self, ignore_notes: bool) {
         // println!("    terminate_measure: {:?}", self.elements);
 
         let notes_count = self
@@ -235,9 +235,10 @@ impl SongContext {
             }
             BranchContext::Duplicate(_) => {
                 self.elements.clear();
-                return Ok(());
+                return;
             }
         };
+        let parse_notes = parse_notes && ignore_notes;
 
         if let BranchContext::First(context) = &mut self.branch_context {
             context.shared_elements.push((notes_count, Vec::new()));
@@ -318,9 +319,9 @@ impl SongContext {
                             None
                         }
                         _ => {
-                            return Err(TjaError::Unreachable(
+                            unreachable!(
                                 "NoteChar must contain characters between '0' and '9'",
-                            ));
+                            );
                         }
                     } {
                         self.score.notes.push(note);
@@ -367,7 +368,6 @@ impl SongContext {
         }
 
         self.elements.clear();
-        Ok(())
     }
     fn scroll_speed(&self) -> Bpm {
         Bpm(self.bpm.0 * self.parser_state.hs)
@@ -471,7 +471,7 @@ impl SongContext {
     }
 
     fn branch_start(&mut self, branch_condition: &str) {
-        // TODO measure cleanup
+        self.terminate_measure(false);
 
         let condition = match Self::parse_branch_condition(branch_condition) {
             Ok(c) => c,
@@ -495,7 +495,8 @@ impl SongContext {
     }
 
     fn branch_switch(&mut self, branch_type: BranchType) {
-        // TODO measure cleanup
+        self.terminate_measure(false);
+
         let branch_context = std::mem::replace(&mut self.branch_context, BranchContext::Outside);
         self.branch_context = match branch_context {
             current @ BranchContext::Outside => {
@@ -545,7 +546,8 @@ impl SongContext {
     }
 
     fn branch_end(&mut self) {
-        // TODO measure cleanup
+        self.terminate_measure(false);
+
         match std::mem::replace(&mut self.branch_context, BranchContext::Outside) {
             BranchContext::Outside => {
                 eprintln!("#BRANCHEND found before #BRANCHSTART");
@@ -671,7 +673,7 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
                         _ => None,
                     }));
                 if split.next().is_some() {
-                    context.terminate_measure()?;
+                    context.terminate_measure(true);
                 }
             }
         } else {
