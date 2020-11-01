@@ -254,7 +254,7 @@ fn main() -> Result<(), TaikoError> {
                 .branches
                 .iter()
                 .filter_map(|bar_line| {
-                    let x = get_x(music_position, bar_line.time, &bar_line.scroll_speed) as i32;
+                    let x = get_x(music_position, bar_line.switch_time, &bar_line.scroll_speed) as i32;
                     if 0 <= x && x <= 2000 {
                         return Some(Rect::new(x + 96, 288, 3, 195));
                     }
@@ -271,7 +271,7 @@ fn main() -> Result<(), TaikoError> {
             for note in game_manager.score.notes.iter().rev() {
                 branches
                     .peeking_take_while(|t| {
-                        note.time < t.time || t.info.determined_branch.is_none()
+                        note.time < t.switch_time || t.info.determined_branch.is_none()
                     })
                     .for_each(|_| {});
                 let branch = branches.peek().and_then(|b| b.info.determined_branch).unwrap_or(BranchType::Normal);
@@ -437,7 +437,7 @@ fn main() -> Result<(), TaikoError> {
 
 fn get_x(music_position: f64, time: f64, scroll_speed: &Bpm) -> f64 {
     let diff = time - music_position;
-    520.0 + 1422.0 / 4.0 * diff / scroll_speed.get_beat_duration()
+    520.0 + 1422.0 / 4.0 * diff / scroll_speed.beat_duration()
 }
 
 fn draw_note(

@@ -266,7 +266,7 @@ impl GameManager {
         let mut branch_pointer = *judge_branch_pointer;
         check_on_timeline(notes, judge_pointer, |note: &mut Note| {
             while branches.get(branch_pointer).map_or(false, |branch| {
-                branch.time <= note.time && branch.info.determined_branch.is_some()
+                branch.switch_time <= note.time && branch.info.determined_branch.is_some()
             }) {
                 branch_pointer += 1;
             }

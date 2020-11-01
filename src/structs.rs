@@ -79,7 +79,8 @@ pub mod typed {
 
     #[derive(Clone, Copy, Debug)]
     pub struct Branch<T: AdditionalInfo> {
-        pub time: f64,
+        pub judge_time: f64,
+        pub switch_time: f64,
         pub scroll_speed: Bpm,
         pub condition: BranchCondition,
         pub info: T::Branch,
@@ -88,7 +89,8 @@ pub mod typed {
     impl<T: AdditionalInfo> Branch<T> {
         pub fn with_info<U: AdditionalInfo>(&self, info: U::Branch) -> Branch<U> {
             Branch {
-                time: self.time,
+                judge_time: self.judge_time,
+                switch_time: self.switch_time,
                 scroll_speed: self.scroll_speed,
                 condition: self.condition,
                 info,
@@ -166,7 +168,7 @@ impl Measure {
 pub struct Bpm(pub f64);
 
 impl Bpm {
-    pub fn get_beat_duration(&self) -> f64 {
+    pub fn beat_duration(&self) -> f64 {
         60.0 / self.0
     }
 }

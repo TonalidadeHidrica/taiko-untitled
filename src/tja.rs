@@ -39,7 +39,7 @@ impl From<io::Error> for TjaError {
 pub struct Song {
     pub title: Option<String>,
     pub subtitle: Option<Subtitle>,
-    pub bpm: f64,
+    pub bpm: Bpm,
     pub wave: Option<PathBuf>,
     pub offset: f64,
     pub song_volume: u32,
@@ -55,7 +55,7 @@ impl Default for Song {
         Self {
             title,
             subtitle,
-            bpm: 120.0,
+            bpm: Bpm(120.0),
             wave,
             offset,
             song_volume: 100, // default value is not asserted to be true
@@ -114,8 +114,8 @@ pub fn load_tja_from_file<P: AsRef<Path>>(path: P) -> Result<Song, TjaError> {
 struct RendaBuffer(Bpm, f64, RendaContent);
 
 #[derive(Debug)]
-struct SongContext {
-    player: Player,
+struct ScoreParser<'a> {
+    song: &'a Song,
     score: Score,
 
     // elements buffer in current measure
@@ -167,16 +167,17 @@ struct SubsequentBranchContext {
     filled_branch: EnumMap<BranchType, bool>,
 }
 
-impl SongContext {
-    fn new(song: &Song) -> SongContext {
-        let (player, elements, measure) = Default::default();
-        SongContext {
-            player,
-            score: Score::default(),
+impl ScoreParser<'_> {
+    fn new(song: &Song, _player: Player) -> ScoreParser {
+        let (score, elements, measure) = Default::default();
+        // TODO store player etc. to score
+        ScoreParser {
+            song,
+            score,
             elements,
             branch_context: BranchContext::Outside,
             measure,
-            bpm: Bpm(song.bpm),
+            bpm: song.bpm,
             parser_state: ParserState {
                 hs: 1.0,
                 bar_line: true,
@@ -187,9 +188,91 @@ impl SongContext {
             balloons: song.balloons.iter().copied().collect(),
         }
     }
-    fn terminate_measure(&mut self, ignore_notes: bool) {
-        // println!("    terminate_measure: {:?}", self.elements);
 
+    fn parse_lines<'a, I>(&mut self, lines: I) -> bool
+    where
+        I: Iterator<Item = &'a str>,
+    {
+        let mut ended_with_end = false;
+        for line in lines {
+            // TODO check if this parser is compatible
+            let line = line
+                .split("//")
+                .next()
+                .expect("Unexpected: split() must have one element");
+            if line.starts_with("#END") {
+                ended_with_end = true;
+                break;
+            } else if let Some(bpm) = take_remaining("#BPMCHANGE", line) {
+                if let Some(bpm) = bpm.parse_first() {
+                    self.elements.push(TjaElement::BpmChange(bpm));
+                } else {
+                    eprintln!("Parse error: {}", line);
+                }
+            } else if line.starts_with("#GOGOSTART") {
+                self.elements.push(TjaElement::Gogo(true));
+            } else if line.starts_with("#GOGOEND") {
+                self.elements.push(TjaElement::Gogo(false));
+            } else if let Some(measure) = take_remaining("#MEASURE", line) {
+                if let [x, y] = &measure.split('/').collect_vec()[..] {
+                    if let (Some(x), Some(y)) = (x.parse_first(), y.parse_first()) {
+                        self.elements.push(TjaElement::Measure(x, y));
+                    }
+                }
+            } else if let Some(scroll) = take_remaining("#SCROLL", line) {
+                if let Some(scroll) = scroll.parse_first() {
+                    self.elements.push(TjaElement::Scroll(scroll));
+                } else {
+                    println!("Ignored: {}", line);
+                }
+            } else if let Some(delay) = take_remaining("#DELAY", line) {
+                if let Some(delay) = delay.parse_first() {
+                    eprintln!("Delay is deprecated, so it may not work properly.");
+                    self.elements.push(TjaElement::Delay(delay));
+                }
+            } else if let Some(branch_condition) = take_remaining("#BRANCHSTART", line) {
+                self.branch_start(branch_condition);
+            } else if line.starts_with("#BRANCHEND") {
+                self.branch_end();
+            } else if line.starts_with("#N") {
+                self.branch_switch(BranchType::Normal);
+            } else if line.starts_with("#E") {
+                self.branch_switch(BranchType::Expert);
+            } else if line.starts_with("#M") {
+                self.branch_switch(BranchType::Master);
+            } else if line.starts_with("#SECTION") {
+                self.section();
+            } else if line.starts_with("#LEVELHOLD") {
+                self.level_hold();
+            } else if line.starts_with("#BARLINEON") {
+                self.elements.push(TjaElement::BarLine(true));
+            } else if line.starts_with("#BARLINEOFF") {
+                self.elements.push(TjaElement::BarLine(false));
+            } else {
+                if line.starts_with('#') {
+                    eprintln!(
+                        "Command {} is not recognized. Parsing as score instead.",
+                        line
+                    );
+                }
+                let mut split = line.split(',');
+                let line = split
+                    .next()
+                    .expect("split() returns always at least one element");
+                self.elements.extend(line.chars().filter_map(|c| match c {
+                    '0'..='9' => Some(TjaElement::NoteChar(c)),
+                    _ => None,
+                }));
+                if split.next().is_some() {
+                    self.terminate_measure(true);
+                }
+            }
+        }
+        self.score.notes.sort_by_key(|e| OrderedFloat::from(e.time));
+        return ended_with_end;
+    }
+
+    fn terminate_measure(&mut self, ignore_notes: bool) {
         let notes_count = self
             .elements
             .iter()
@@ -319,7 +402,7 @@ impl SongContext {
                     }
                     note_index += 1;
                     self.parser_state.time += self.measure.get_beat_count()
-                        * self.bpm.get_beat_duration()
+                        * self.bpm.beat_duration()
                         / notes_count as f64;
                 }
                 TjaElement::BpmChange(bpm) if parse_tempo => self.bpm = Bpm(*bpm),
@@ -455,6 +538,15 @@ impl SongContext {
     }
 
     fn branch_start(&mut self, branch_condition: &str) {
+        // TODO start time
+        let judge_time = self
+            .score
+            .bar_lines
+            .last()
+            .map(|b| b.time)
+            .unwrap_or_else(|| {
+                self.song.offset - self.song.bpm.beat_duration() * 4.0
+            });
         self.terminate_measure(false);
 
         let condition = match Self::parse_branch_condition(branch_condition) {
@@ -465,11 +557,13 @@ impl SongContext {
             }
         };
         self.score.branches.push(Branch {
-            time: self.parser_state.time,
+            judge_time,
+            switch_time: self.parser_state.time,
             scroll_speed: self.scroll_speed(),
             condition,
             info: (),
         });
+        println!("{} {}\n", judge_time, self.parser_state.time);
 
         if !matches!(self.branch_context, BranchContext::Outside) {
             eprintln!("#BRANCHSTART was found before branch ends.");
@@ -558,9 +652,11 @@ impl SongContext {
             BranchContext::Outside | BranchContext::Started => {
                 eprintln!("#LEVELHOLD before #N, #E or #M is ignored.");
                 return;
-            },
+            }
             BranchContext::First(context) => context.branch_type,
-            BranchContext::Subsequent(context) | BranchContext::Duplicate(context) => context.branch_type,
+            BranchContext::Subsequent(context) | BranchContext::Duplicate(context) => {
+                context.branch_type
+            }
         };
         self.push_branch_event(BranchEventKind::LevelHold(branch_type));
     }
@@ -568,7 +664,7 @@ impl SongContext {
     fn push_branch_event(&mut self, kind: BranchEventKind) {
         self.score.branch_events.push(BranchEvent {
             time: self.parser_state.time,
-            kind
+            kind,
         });
     }
 }
@@ -599,181 +695,121 @@ impl Default for Player {
 
 pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
     let mut song = Song::default();
-    let mut song_context: Option<SongContext> = None;
-    'lines: for line in source.lines() {
-        if let Some(ref mut context) = song_context {
-            // TODO check if this parser is compatible
-            let line = line
-                .split("//")
-                .next()
-                .expect("Unexpected: split() must have one element");
-            if line.starts_with("#END") {
-                if let Some(mut context) = song_context.take() {
-                    context
-                        .score
-                        .notes
-                        .sort_by_key(|e| OrderedFloat::from(e.time));
-                    song.score = Some(context.score);
-                    break 'lines;
-                }
-            } else if let Some(bpm) = take_remaining("#BPMCHANGE", line) {
-                if let Some(bpm) = bpm.parse_first() {
-                    context.elements.push(TjaElement::BpmChange(bpm));
-                } else {
-                    eprintln!("Parse error: {}", line);
-                }
-            } else if line.starts_with("#GOGOSTART") {
-                context.elements.push(TjaElement::Gogo(true));
-            } else if line.starts_with("#GOGOEND") {
-                context.elements.push(TjaElement::Gogo(false));
-            } else if let Some(measure) = take_remaining("#MEASURE", line) {
-                if let [x, y] = &measure.split('/').collect_vec()[..] {
-                    if let (Some(x), Some(y)) = (x.parse_first(), y.parse_first()) {
-                        context.elements.push(TjaElement::Measure(x, y));
-                    }
-                }
-            } else if let Some(scroll) = take_remaining("#SCROLL", line) {
-                if let Some(scroll) = scroll.parse_first() {
-                    context.elements.push(TjaElement::Scroll(scroll));
-                } else {
-                    println!("Ignored: {}", line);
-                }
-            } else if let Some(delay) = take_remaining("#DELAY", line) {
-                if let Some(delay) = delay.parse_first() {
-                    eprintln!("Delay is deprecated, so it may not work properly.");
-                    context.elements.push(TjaElement::Delay(delay));
-                }
-            } else if let Some(branch_condition) = take_remaining("#BRANCHSTART", line) {
-                context.branch_start(branch_condition);
-            } else if line.starts_with("#BRANCHEND") {
-                context.branch_end();
-            } else if line.starts_with("#N") {
-                context.branch_switch(BranchType::Normal);
-            } else if line.starts_with("#E") {
-                context.branch_switch(BranchType::Expert);
-            } else if line.starts_with("#M") {
-                context.branch_switch(BranchType::Master);
-            } else if line.starts_with("#SECTION") {
-                context.section();
-            } else if line.starts_with("#LEVELHOLD") {
-                context.level_hold();
-            } else if line.starts_with("#BARLINEON") {
-                context.elements.push(TjaElement::BarLine(true));
-            } else if line.starts_with("#BARLINEOFF") {
-                context.elements.push(TjaElement::BarLine(false));
+
+    let mut lines = source.lines();
+    loop {
+        let player = load_tja_metadata(&mut song, lines.by_ref());
+        let player = match player {
+            None => break,
+            Some(player) => player,
+        };
+        let mut song_context = ScoreParser::new(&song, player);
+        let ended_with_end = song_context.parse_lines(lines.by_ref());
+        song.score = Some(song_context.score);
+        if !ended_with_end {
+            eprintln!("Warning: The score did not ended with #END");
+            break;
+        }
+        break;
+    }
+
+    Ok(song)
+}
+
+fn load_tja_metadata<'a, I>(song: &mut Song, lines: &mut I) -> Option<Player>
+where
+    I: Iterator<Item = &'a str>,
+{
+    for line in lines {
+        if let Some(remaining) = take_remaining("#START", line) {
+            let player = match remaining
+                .chars()
+                .skip_while(|c| *c != 'P' || *c != 'p')
+                .nth(1)
+            {
+                Some('1') => Player::Double1P,
+                Some('2') => Player::Double2P,
+                _ => Player::Single,
+            };
+            return Some(player);
+        } else if let Some(title) = take_remaining("TITLE:", line) {
+            // TODO warnings on override
+            song.title = Some(title.to_string());
+        } else if let Some(subtitle) = take_remaining("SUBTITLE:", line) {
+            if let Some(subtitle) = take_remaining("--", subtitle) {
+                song.subtitle = Some(Subtitle {
+                    text: subtitle.to_string(),
+                    style: SubtitleStyle::Suppress,
+                });
+            } else if let Some(subtitle) = take_remaining("++", subtitle) {
+                song.subtitle = Some(Subtitle {
+                    text: subtitle.to_string(),
+                    style: SubtitleStyle::Show,
+                })
             } else {
-                if line.starts_with('#') {
-                    eprintln!(
-                        "Command {} is not recognized. Parsing as score instead.",
-                        line
-                    );
-                }
-                let mut split = line.split(',');
-                let line = split
-                    .next()
-                    .expect("split() returns always at least one element");
-                context
-                    .elements
-                    .extend(line.chars().filter_map(|c| match c {
-                        '0'..='9' => Some(TjaElement::NoteChar(c)),
-                        _ => None,
-                    }));
-                if split.next().is_some() {
-                    context.terminate_measure(true);
+                song.subtitle = Some(Subtitle {
+                    text: subtitle.to_string(),
+                    style: SubtitleStyle::Unspecified,
+                })
+            }
+        } else if let Some(_level) = take_remaining("LEVEL:", line) {
+            eprintln!("Warning: LEVEL not implemented");
+        } else if let Some(bpm) = take_remaining("BPM:", line) {
+            // TODO error warnings and wider accepted format
+            if let Some(bpm) = bpm.parse_first() {
+                if bpm > 0.0 {
+                    song.bpm = Bpm(bpm);
                 }
             }
+        } else if let Some(wave) = take_remaining("WAVE:", line) {
+            song.wave = Some(Path::new(wave).to_path_buf());
+        } else if let Some(offset) = take_remaining("OFFSET:", line) {
+            if let Some(offset) = offset.parse_first() {
+                song.offset = offset;
+            }
+        } else if let Some(balloon) = take_remaining("BALLOON:", line) {
+            song.balloons = balloon
+                .split(',')
+                .filter_map(ParseFirst::parse_first)
+                .collect_vec();
+        } else if let Some(song_volume) = take_remaining("SONGVOL:", line) {
+            if let Some(song_volume) = song_volume.parse_first() {
+                song.song_volume = min(song_volume, 5000);
+            }
+        } else if let Some(se_volume) = take_remaining("SEVOL:", line) {
+            if let Some(se_volume) = se_volume.parse_first() {
+                song.se_volume = min(se_volume, 5000);
+            }
+        } else if let Some(_) = take_remaining("SCOREINIT:", line) {
+            eprintln!("Warning: SCOREINIT not implemented")
+        } else if let Some(_) = take_remaining("SCOREDIFF:", line) {
+            eprintln!("Warning: SCOREDIFF not implemented")
+        } else if let Some(_) = take_remaining("COURSE:", line) {
+            eprintln!("Warning: COURSE not implemented")
+        } else if let Some(_) = take_remaining("STYLE:", line) {
+            eprintln!("Warning: STYLE not implemented")
+        } else if let Some(_) = take_remaining("GAME:", line) {
+            eprintln!("Warning: GAME not implemented")
+        } else if let Some(_) = take_remaining("LIFE:", line) {
+            eprintln!("Warning: LIFE not implemented")
+        } else if let Some(_) = take_remaining("DEMOSTART:", line) {
+            eprintln!("Warning: DEMOSTART not implemented")
+        } else if let Some(_) = take_remaining("SIDE:", line) {
+            eprintln!("Warning: SIDE not implemented")
+        } else if let Some(_) = take_remaining("SCOREMODE:", line) {
+            eprintln!("Warning: SCOREMODE not implemented")
+        } else if let Some(_) = take_remaining("TOTAL:", line) {
+            eprintln!("Warning: TOTAL not implemented")
         } else {
-            if let Some(remaining) = take_remaining("#START", line) {
-                let mut song_context_new = SongContext::new(&song);
-                song_context_new.player = match remaining
-                    .chars()
-                    .skip_while(|c| *c != 'P' || *c != 'p')
-                    .nth(1)
-                {
-                    Some('1') => Player::Double1P,
-                    Some('2') => Player::Double2P,
-                    _ => Player::Single,
-                };
-                song_context = Some(song_context_new);
-            } else if let Some(title) = take_remaining("TITLE:", line) {
-                // TODO warnings on override
-                song.title = Some(title.to_string());
-            } else if let Some(subtitle) = take_remaining("SUBTITLE:", line) {
-                if let Some(subtitle) = take_remaining("--", subtitle) {
-                    song.subtitle = Some(Subtitle {
-                        text: subtitle.to_string(),
-                        style: SubtitleStyle::Suppress,
-                    });
-                } else if let Some(subtitle) = take_remaining("++", subtitle) {
-                    song.subtitle = Some(Subtitle {
-                        text: subtitle.to_string(),
-                        style: SubtitleStyle::Show,
-                    })
-                } else {
-                    song.subtitle = Some(Subtitle {
-                        text: subtitle.to_string(),
-                        style: SubtitleStyle::Unspecified,
-                    })
-                }
-            } else if let Some(_level) = take_remaining("LEVEL:", line) {
-                eprintln!("Warning: LEVEL not implemented");
-            } else if let Some(bpm) = take_remaining("BPM:", line) {
-                // TODO error warnings and wider accepted format
-                if let Some(bpm) = bpm.parse_first() {
-                    if bpm > 0.0 {
-                        song.bpm = bpm;
-                    }
-                }
-            } else if let Some(wave) = take_remaining("WAVE:", line) {
-                song.wave = Some(Path::new(wave).to_path_buf());
-            } else if let Some(offset) = take_remaining("OFFSET:", line) {
-                if let Some(offset) = offset.parse_first() {
-                    song.offset = offset;
-                }
-            } else if let Some(balloon) = take_remaining("BALLOON:", line) {
-                song.balloons = balloon
-                    .split(',')
-                    .filter_map(ParseFirst::parse_first)
-                    .collect_vec();
-            } else if let Some(song_volume) = take_remaining("SONGVOL:", line) {
-                if let Some(song_volume) = song_volume.parse_first() {
-                    song.song_volume = min(song_volume, 5000);
-                }
-            } else if let Some(se_volume) = take_remaining("SEVOL:", line) {
-                if let Some(se_volume) = se_volume.parse_first() {
-                    song.se_volume = min(se_volume, 5000);
-                }
-            } else if let Some(_) = take_remaining("SCOREINIT:", line) {
-                eprintln!("Warning: SCOREINIT not implemented")
-            } else if let Some(_) = take_remaining("SCOREDIFF:", line) {
-                eprintln!("Warning: SCOREDIFF not implemented")
-            } else if let Some(_) = take_remaining("COURSE:", line) {
-                eprintln!("Warning: COURSE not implemented")
-            } else if let Some(_) = take_remaining("STYLE:", line) {
-                eprintln!("Warning: STYLE not implemented")
-            } else if let Some(_) = take_remaining("GAME:", line) {
-                eprintln!("Warning: GAME not implemented")
-            } else if let Some(_) = take_remaining("LIFE:", line) {
-                eprintln!("Warning: LIFE not implemented")
-            } else if let Some(_) = take_remaining("DEMOSTART:", line) {
-                eprintln!("Warning: DEMOSTART not implemented")
-            } else if let Some(_) = take_remaining("SIDE:", line) {
-                eprintln!("Warning: SIDE not implemented")
-            } else if let Some(_) = take_remaining("SCOREMODE:", line) {
-                eprintln!("Warning: SCOREMODE not implemented")
-            } else if let Some(_) = take_remaining("TOTAL:", line) {
-                eprintln!("Warning: TOTAL not implemented")
-            } else {
-                let mut split = line.split(':');
-                let key = split.next().expect("Split has always at least one element");
-                let value = split.next();
-                if value.is_some() {
-                    eprintln!("Unknown key: {}", key);
-                }
+            let mut split = line.split(':');
+            let key = split.next().expect("Split has always at least one element");
+            let value = split.next();
+            if value.is_some() {
+                eprintln!("Unknown key: {}", key);
             }
         }
     }
-    Ok(song)
+    None
 }
 
 fn take_remaining<'a>(key: &'static str, string: &'a str) -> Option<&'a str> {
