@@ -544,9 +544,7 @@ impl ScoreParser<'_> {
             .bar_lines
             .last()
             .map(|b| b.time)
-            .unwrap_or_else(|| {
-                self.song.offset - self.song.bpm.beat_duration() * 4.0
-            });
+            .unwrap_or_else(|| self.song.offset - self.song.bpm.beat_duration() * 4.0);
         self.terminate_measure(false);
 
         let condition = match Self::parse_branch_condition(branch_condition) {

@@ -19,7 +19,7 @@ use taiko_untitled::errors::{
 use taiko_untitled::game::{GameManager, Judge};
 use taiko_untitled::structs::{
     typed::{NoteContent, RendaContent, RendaKind},
-    Bpm, NoteColor, NoteSize, SingleNoteKind, BranchType,
+    Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
 };
 use taiko_untitled::tja::{load_tja_from_file, Song};
 
@@ -254,7 +254,8 @@ fn main() -> Result<(), TaikoError> {
                 .branches
                 .iter()
                 .filter_map(|bar_line| {
-                    let x = get_x(music_position, bar_line.switch_time, &bar_line.scroll_speed) as i32;
+                    let x =
+                        get_x(music_position, bar_line.switch_time, &bar_line.scroll_speed) as i32;
                     if 0 <= x && x <= 2000 {
                         return Some(Rect::new(x + 96, 288, 3, 195));
                     }
@@ -274,7 +275,10 @@ fn main() -> Result<(), TaikoError> {
                         note.time < t.switch_time || t.info.determined_branch.is_none()
                     })
                     .for_each(|_| {});
-                let branch = branches.peek().and_then(|b| b.info.determined_branch).unwrap_or(BranchType::Normal);
+                let branch = branches
+                    .peek()
+                    .and_then(|b| b.info.determined_branch)
+                    .unwrap_or(BranchType::Normal);
                 if note.branch.map_or(false, |b| b != branch) {
                     continue;
                 }

@@ -68,23 +68,29 @@ pub struct GameManager {
     judge_branch_pointer: usize,
     judge_branch_bad_pointer: usize,
 
+    next_branch_pointer: usize,
+    game_state_section: GameState,
+
     pub game_state: GameState,
     pub animation_state: AnimationState,
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, derive_more::Sub)]
 pub struct GameState {
-    pub good_count: u32,
-    pub ok_count: u32,
-    pub bad_count: u32,
+    pub score: u64,
 
-    pub combo: u32,
+    pub good_count: u64,
+    pub ok_count: u64,
+    pub bad_count: u64,
+    pub renda_count: u64,
+
+    pub combo: u64,
     // f64 has enough precision.  See the test below
     pub gauge: f64,
 }
 
 impl GameState {
-    pub fn judge_count_mut(&mut self, judge: Judge) -> &mut u32 {
+    pub fn judge_count_mut(&mut self, judge: Judge) -> &mut u64 {
         match judge {
             Judge::Good => &mut self.good_count,
             Judge::Ok => &mut self.ok_count,
@@ -238,6 +244,9 @@ impl GameManager {
             judge_branch_pointer: 0,
             judge_branch_bad_pointer: 0,
 
+            next_branch_pointer: 0,
+            game_state_section: Default::default(),
+
             game_state: Default::default(),
             animation_state: Default::default(),
         }
@@ -270,9 +279,9 @@ impl GameManager {
             }) {
                 branch_pointer += 1;
             }
-            let branch = (branch_pointer > 0).and_option_from(|| {
-                branches[branch_pointer - 1].info.determined_branch
-            }).unwrap_or(BranchType::Normal);
+            let branch = (branch_pointer > 0)
+                .and_option_from(|| branches[branch_pointer - 1].info.determined_branch)
+                .unwrap_or(BranchType::Normal);
             let branch_matches = note.branch.map_or(true, |b| b == branch);
 
             let ret = check_note(note, branch_matches);
@@ -284,7 +293,47 @@ impl GameManager {
         })
     }
 
+    fn branch_by_candidate<T>(v: T, e: T, m: T) -> BranchType
+    where
+        T: PartialOrd + std::fmt::Debug,
+    {
+        dbg!((&v, &m, &e));
+        match v {
+            v if v >= m => BranchType::Master,
+            v if v >= e => BranchType::Expert,
+            _ => BranchType::Normal,
+        }
+    }
+
     pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
+        if let Some(branch) = self.score.branches.get_mut(self.next_branch_pointer) {
+            if branch.judge_time <= time {
+                let diff = self.game_state - self.game_state_section;
+                dbg!(diff);
+                branch.info.determined_branch = match branch.condition {
+                    BranchCondition::Pass => None,
+                    BranchCondition::Precision(e, m) => {
+                        let score = 2 * diff.good_count + diff.ok_count;
+                        let total = 2 * (diff.good_count + diff.ok_count + diff.bad_count);
+                        let precision = if total == 0 {
+                            0.0
+                        } else {
+                            score as f64 / total as f64 * 100.0
+                        };
+                        Self::branch_by_candidate(precision, e, m).into()
+                    }
+                    BranchCondition::Renda(e, m) => {
+                        Self::branch_by_candidate(diff.renda_count, e, m).into()
+                    }
+                    BranchCondition::Score(e, m) => {
+                        Self::branch_by_candidate(diff.score, e, m).into()
+                    }
+                };
+                self.next_branch_pointer += 1;
+                dbg!(branch.info.determined_branch);
+            }
+        }
+
         let Self {
             game_state,
             animation_state,
@@ -340,6 +389,7 @@ impl GameManager {
                     if branch_matches {
                         match (&mut renda.kind, &color) {
                             (RendaKind::Unlimited(renda_u), Some(color)) => {
+                                game_state.renda_count += 1;
                                 renda.info.count += 1;
                                 animation_state.flying_notes.push_back(FlyingNote {
                                     time,
@@ -351,6 +401,7 @@ impl GameManager {
                             }
                             (RendaKind::Quota(ref mut renda_q), Some(NoteColor::Don)) => {
                                 if !renda_q.info.finished {
+                                    game_state.renda_count += 1;
                                     renda.info.count += 1;
                                     if renda.info.count >= renda_q.quota {
                                         renda_q.info.finished = true;
