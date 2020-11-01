@@ -6,3 +6,4 @@ pub mod game;
 pub mod rodio;
 pub mod structs;
 pub mod tja;
+pub mod utils;

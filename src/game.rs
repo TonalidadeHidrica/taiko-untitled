@@ -1,7 +1,10 @@
 use crate::structs::{
-    typed::{NoteContent, QuotaRenda, RendaContent, RendaKind, Score, SingleNote, UnlimitedRenda},
+    typed::{
+        Branch, NoteContent, QuotaRenda, RendaContent, RendaKind, Score, SingleNote, UnlimitedRenda,
+    },
     *,
 };
+use boolinator::Boolinator;
 use enum_map::{enum_map, Enum, EnumMap};
 use itertools::Itertools;
 use num::clamp;
@@ -62,6 +65,8 @@ pub struct GameManager {
 
     judge_pointer: usize,
     judge_bad_pointer: usize,
+    judge_branch_pointer: usize,
+    judge_branch_bad_pointer: usize,
 
     pub game_state: GameState,
     pub animation_state: AnimationState,
@@ -230,6 +235,8 @@ impl GameManager {
 
             judge_pointer: 0,
             judge_bad_pointer: 0,
+            judge_branch_pointer: 0,
+            judge_branch_bad_pointer: 0,
 
             game_state: Default::default(),
             animation_state: Default::default(),
@@ -246,48 +253,91 @@ impl GameManager {
         self.auto
     }
 
+    fn check_note_wrapper<F, T>(
+        notes: &mut Vec<Note>,
+        branches: &Vec<Branch<OfGameState>>,
+        judge_pointer: &mut usize,
+        judge_branch_pointer: &mut usize,
+        mut check_note: F,
+    ) -> Option<T>
+    where
+        F: FnMut(&mut Note, bool) -> JudgeOnTimeline<T>,
+    {
+        let mut branch_pointer = *judge_branch_pointer;
+        check_on_timeline(notes, judge_pointer, |note: &mut Note| {
+            while branches.get(branch_pointer).map_or(false, |branch| {
+                branch.time <= note.time && branch.info.determined_branch.is_some()
+            }) {
+                branch_pointer += 1;
+            }
+            let branch = (branch_pointer > 0).and_option_from(|| {
+                branches[branch_pointer - 1].info.determined_branch
+            }).unwrap_or(BranchType::Normal);
+            let branch_matches = note.branch.map_or(true, |b| b == branch);
+
+            let ret = check_note(note, branch_matches);
+
+            if let JudgeOnTimeline::Past = ret {
+                *judge_branch_pointer = branch_pointer;
+            }
+            ret
+        })
+    }
+
     pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
-        let game_state = &mut self.game_state;
-        let animation_state = &mut self.animation_state;
-        let _ = check_on_timeline(
-            &mut self.score.notes,
-            &mut self.judge_pointer,
-            |note| match note.content {
-                NoteContent::Single(ref mut single_note) => match note.time - time {
-                    t if t.abs() <= OK_WINDOW => {
-                        if single_note.info.judge.is_none() && single_note.corresponds(&color) {
-                            let judge = if t.abs() <= GOOD_WINDOW {
-                                Judge::Good
-                            } else {
-                                Judge::Ok
-                            };
+        let Self {
+            game_state,
+            animation_state,
+            score: Score {
+                notes, branches, ..
+            },
+            judge_pointer,
+            judge_bad_pointer,
+            judge_branch_pointer,
+            judge_branch_bad_pointer,
+            ..
+        } = self;
 
-                            game_state.update_with_judge(single_note, judge);
-                            animation_state.flying_notes.push_back(FlyingNote {
-                                time,
-                                kind: single_note.kind.clone(),
-                            });
-                            animation_state
-                                .judge_strs
-                                .push_back(JudgeStr { time, judge });
-                            animation_state.last_combo_update = time;
-
-                            JudgeOnTimeline::BreakWith(())
+        let check_note = |note: &mut Note, branch_matches: bool| match note.content {
+            NoteContent::Single(ref mut single_note) => match note.time - time {
+                t if t.abs() <= OK_WINDOW => {
+                    if single_note.info.judge.is_none()
+                        && single_note.corresponds(&color)
+                        && branch_matches
+                    {
+                        let judge = if t.abs() <= GOOD_WINDOW {
+                            Judge::Good
                         } else {
-                            JudgeOnTimeline::Continue
-                        }
+                            Judge::Ok
+                        };
+
+                        game_state.update_with_judge(single_note, judge);
+                        animation_state.flying_notes.push_back(FlyingNote {
+                            time,
+                            kind: single_note.kind.clone(),
+                        });
+                        animation_state
+                            .judge_strs
+                            .push_back(JudgeStr { time, judge });
+                        animation_state.last_combo_update = time;
+
+                        JudgeOnTimeline::BreakWith(())
+                    } else {
+                        JudgeOnTimeline::Continue
                     }
-                    t if t < 0.0 => {
-                        if single_note.info.judge.is_none() {
-                            game_state.update_with_judge(single_note, JudgeOrPassed::Passed);
-                        }
-                        JudgeOnTimeline::Past
+                }
+                t if t < 0.0 => {
+                    if single_note.info.judge.is_none() && branch_matches {
+                        game_state.update_with_judge(single_note, JudgeOrPassed::Passed);
                     }
-                    t if t > 0.0 => JudgeOnTimeline::Break,
-                    _ => unreachable!(),
-                },
-                NoteContent::Renda(ref mut renda) => match () {
-                    _ if note.time <= time && time < renda.end_time => {
+                    JudgeOnTimeline::Past
+                }
+                t if t > 0.0 => JudgeOnTimeline::Break,
+                _ => unreachable!(),
+            },
+            NoteContent::Renda(ref mut renda) => match () {
+                _ if note.time <= time && time < renda.end_time => {
+                    if branch_matches {
                         match (&mut renda.kind, &color) {
                             (RendaKind::Unlimited(renda_u), Some(color)) => {
                                 renda.info.count += 1;
@@ -317,40 +367,60 @@ impl GameManager {
                             _ => {}
                         };
                         JudgeOnTimeline::BreakWith(())
+                    } else {
+                        JudgeOnTimeline::Continue
                     }
-                    _ if renda.end_time <= time => JudgeOnTimeline::Past,
-                    _ if time < note.time => JudgeOnTimeline::Break,
-                    _ => unreachable!(),
-                },
-            },
-        )
-        .is_some()
-            || check_on_timeline(&mut self.score.notes, &mut self.judge_bad_pointer, |note| {
-                if let NoteContent::Single(ref mut single_note) = note.content {
-                    match note.time - time {
-                        t if t.abs() <= BAD_WINDOW => {
-                            if matches!(single_note.info.judge, None | Some(JudgeOrPassed::Passed))
-                                && single_note.corresponds(&color)
-                            {
-                                let judge = Judge::Bad;
-                                game_state.update_with_judge(single_note, judge);
-                                animation_state
-                                    .judge_strs
-                                    .push_back(JudgeStr { time, judge });
-                                JudgeOnTimeline::BreakWith(())
-                            } else {
-                                JudgeOnTimeline::Continue
-                            }
-                        }
-                        t if t < 0.0 => JudgeOnTimeline::Past,
-                        t if t > 0.0 => JudgeOnTimeline::Break,
-                        _ => unreachable!(),
-                    }
-                } else {
-                    JudgeOnTimeline::Past
                 }
-            })
+                _ if renda.end_time <= time => JudgeOnTimeline::Past,
+                _ if time < note.time => JudgeOnTimeline::Break,
+                _ => unreachable!(),
+            },
+        };
+        let first_hit_check = Self::check_note_wrapper(
+            notes,
+            branches,
+            judge_pointer,
+            judge_branch_pointer,
+            check_note,
+        )
+        .is_some();
+
+        let check_note_bad = |note: &mut Note, branch_matches: bool| {
+            if let NoteContent::Single(ref mut single_note) = note.content {
+                match note.time - time {
+                    t if t.abs() <= BAD_WINDOW => {
+                        if matches!(single_note.info.judge, None | Some(JudgeOrPassed::Passed))
+                            && single_note.corresponds(&color)
+                            && branch_matches
+                        {
+                            let judge = Judge::Bad;
+                            game_state.update_with_judge(single_note, judge);
+                            animation_state
+                                .judge_strs
+                                .push_back(JudgeStr { time, judge });
+                            JudgeOnTimeline::BreakWith(())
+                        } else {
+                            JudgeOnTimeline::Continue
+                        }
+                    }
+                    t if t < 0.0 => JudgeOnTimeline::Past,
+                    t if t > 0.0 => JudgeOnTimeline::Break,
+                    _ => unreachable!(),
+                }
+            } else {
+                JudgeOnTimeline::Past
+            }
+        };
+        let _overall_hit_check = first_hit_check
+            || Self::check_note_wrapper(
+                notes,
+                branches,
+                judge_bad_pointer,
+                judge_branch_bad_pointer,
+                check_note_bad,
+            )
             .is_some();
+        // || check_on_timeline(notes, judge_bad_pointer, check_note_bad).is_some();
     }
 
     pub fn flying_notes<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &FlyingNote>
