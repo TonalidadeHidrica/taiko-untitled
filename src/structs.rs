@@ -137,9 +137,9 @@ pub enum QuotaRendaKind {
 #[derive(Clone, Copy, Debug)]
 pub enum BranchCondition {
     Pass,
-    Renda(u64, u64),
+    Renda(i64, i64),
     Precision(f64, f64),
-    Score(u64, u64),
+    Score(i64, i64),
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -1,7 +1,5 @@
 use crate::structs::{
-    typed::{
-        Branch, NoteContent, QuotaRenda, RendaContent, RendaKind, Score, SingleNote, UnlimitedRenda,
-    },
+    typed::{NoteContent, QuotaRenda, RendaContent, RendaKind, Score, SingleNote, UnlimitedRenda},
     *,
 };
 use boolinator::Boolinator;
@@ -57,6 +55,7 @@ impl SingleNote<OfGameState> {
 
 // TODO use define_types macro
 pub type Note = typed::Note<OfGameState>;
+pub type Branch = typed::Branch<OfGameState>;
 
 pub struct GameManager {
     pub score: Score<OfGameState>,
@@ -70,6 +69,8 @@ pub struct GameManager {
 
     next_branch_pointer: usize,
     game_state_section: GameState,
+    branch_event_pointer: usize,
+    branch_event_branch_pointer: usize,
 
     pub game_state: GameState,
     pub animation_state: AnimationState,
@@ -77,20 +78,21 @@ pub struct GameManager {
 
 #[derive(Clone, Copy, Default, Debug, derive_more::Sub)]
 pub struct GameState {
-    pub score: u64,
+    // The following integers are signed integers to enable subtractions
+    pub score: i64,
 
-    pub good_count: u64,
-    pub ok_count: u64,
-    pub bad_count: u64,
-    pub renda_count: u64,
+    pub good_count: i64,
+    pub ok_count: i64,
+    pub bad_count: i64,
+    pub renda_count: i64,
 
-    pub combo: u64,
+    pub combo: i64,
     // f64 has enough precision.  See the test below
     pub gauge: f64,
 }
 
 impl GameState {
-    pub fn judge_count_mut(&mut self, judge: Judge) -> &mut u64 {
+    pub fn judge_count_mut(&mut self, judge: Judge) -> &mut i64 {
         match judge {
             Judge::Good => &mut self.good_count,
             Judge::Ok => &mut self.ok_count,
@@ -246,6 +248,8 @@ impl GameManager {
 
             next_branch_pointer: 0,
             game_state_section: Default::default(),
+            branch_event_pointer: 0,
+            branch_event_branch_pointer: 0,
 
             game_state: Default::default(),
             animation_state: Default::default(),
@@ -262,9 +266,20 @@ impl GameManager {
         self.auto
     }
 
+    pub fn branch_at(branches: &Vec<Branch>, branch_pointer: &mut usize, time: f64) -> BranchType {
+        while branches.get(*branch_pointer).map_or(false, |branch| {
+            branch.switch_time <= time && branch.info.determined_branch.is_some()
+        }) {
+            *branch_pointer += 1;
+        }
+        (*branch_pointer > 0)
+            .and_option_from(|| branches[*branch_pointer - 1].info.determined_branch)
+            .unwrap_or(BranchType::Normal)
+    }
+
     fn check_note_wrapper<F, T>(
         notes: &mut Vec<Note>,
-        branches: &Vec<Branch<OfGameState>>,
+        branches: &Vec<Branch>,
         judge_pointer: &mut usize,
         judge_branch_pointer: &mut usize,
         mut check_note: F,
@@ -274,14 +289,7 @@ impl GameManager {
     {
         let mut branch_pointer = *judge_branch_pointer;
         check_on_timeline(notes, judge_pointer, |note: &mut Note| {
-            while branches.get(branch_pointer).map_or(false, |branch| {
-                branch.switch_time <= note.time && branch.info.determined_branch.is_some()
-            }) {
-                branch_pointer += 1;
-            }
-            let branch = (branch_pointer > 0)
-                .and_option_from(|| branches[branch_pointer - 1].info.determined_branch)
-                .unwrap_or(BranchType::Normal);
+            let branch = Self::branch_at(branches, &mut branch_pointer, note.time);
             let branch_matches = note.branch.map_or(true, |b| b == branch);
 
             let ret = check_note(note, branch_matches);
@@ -305,6 +313,35 @@ impl GameManager {
     }
 
     pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
+        // Process branch events (i.e. #LEVELHOLD and #SECTION)
+        while let Some(event) = self.score.branch_events.get(self.branch_event_pointer) {
+            if time < event.time {
+                break;
+            }
+            match event.kind {
+                BranchEventKind::Section => {
+                    self.game_state_section = self.game_state;
+                }
+                BranchEventKind::LevelHold(branch) => {
+                    if branch
+                        == Self::branch_at(
+                            &self.score.branches,
+                            &mut self.branch_event_branch_pointer,
+                            event.time,
+                        )
+                    {
+                        println!("Level Holded");
+                        self.score.branches[self.next_branch_pointer..]
+                            .iter_mut()
+                            .for_each(|v| v.info.determined_branch = Some(branch));
+                        self.next_branch_pointer = self.score.branches.len();
+                    }
+                }
+            }
+            self.branch_event_pointer += 1;
+        }
+
+        // Determine upcoming branch if needed
         if let Some(branch) = self.score.branches.get_mut(self.next_branch_pointer) {
             if branch.judge_time <= time {
                 let diff = self.game_state - self.game_state_section;
@@ -327,6 +364,7 @@ impl GameManager {
                         Self::branch_by_candidate(diff.score, e, m).into()
                     }
                 };
+                dbg!(branch.info.determined_branch);
                 self.next_branch_pointer += 1;
             }
         }
