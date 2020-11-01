@@ -1,1 +1,0 @@
-   Compiling taiko-untitled v0.1.0 (/Users/seasellsheshell/dev/git/com/github/TonalidadeHidrica/taiko-untitled)

@@ -297,7 +297,6 @@ impl GameManager {
     where
         T: PartialOrd + std::fmt::Debug,
     {
-        dbg!((&v, &m, &e));
         match v {
             v if v >= m => BranchType::Master,
             v if v >= e => BranchType::Expert,
@@ -309,7 +308,6 @@ impl GameManager {
         if let Some(branch) = self.score.branches.get_mut(self.next_branch_pointer) {
             if branch.judge_time <= time {
                 let diff = self.game_state - self.game_state_section;
-                dbg!(diff);
                 branch.info.determined_branch = match branch.condition {
                     BranchCondition::Pass => None,
                     BranchCondition::Precision(e, m) => {
@@ -330,7 +328,6 @@ impl GameManager {
                     }
                 };
                 self.next_branch_pointer += 1;
-                dbg!(branch.info.determined_branch);
             }
         }
 
@@ -471,7 +468,6 @@ impl GameManager {
                 check_note_bad,
             )
             .is_some();
-        // || check_on_timeline(notes, judge_bad_pointer, check_note_bad).is_some();
     }
 
     pub fn flying_notes<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &FlyingNote>
@@ -502,6 +498,7 @@ where
 }
 
 // TODO naming and structure
+#[derive(Debug)]
 pub enum JudgeOnTimeline<T> {
     Past,
     Continue,
@@ -513,7 +510,9 @@ fn check_on_timeline<T, U, F>(vec: &mut Vec<T>, pointer: &mut usize, mut f: F) -
 where
     F: FnMut(&mut T) -> JudgeOnTimeline<U>,
 {
-    for (i, e) in vec[*pointer..].iter_mut().enumerate() {
+    let origin = *pointer;
+    for (mut i, e) in vec[origin..].iter_mut().enumerate() {
+        i += origin;
         match f(e) {
             JudgeOnTimeline::Past => *pointer = i + 1,
             JudgeOnTimeline::Break => break,
