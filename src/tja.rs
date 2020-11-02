@@ -122,10 +122,6 @@ struct ScoreParser<'a> {
     elements: Vec<TjaElement>,
 
     branch_context: BranchContext,
-    // Should be not overwritten while reading subsequent branches
-    measure: Measure,
-    bpm: Bpm,
-    // Should be restored after branch ends
     parser_state: ParserState,
 
     balloons: VecDeque<u64>,
@@ -134,7 +130,9 @@ struct ScoreParser<'a> {
 #[derive(Clone, Debug)]
 struct ParserState {
     time: f64,
-    // Independent
+    measure: Measure,
+    bpm: Bpm,
+
     hs: f64,
     bar_line: bool,
     gogo: bool,
@@ -176,14 +174,14 @@ impl ScoreParser<'_> {
             score,
             elements,
             branch_context: BranchContext::Outside,
-            measure,
-            bpm: song.bpm,
             parser_state: ParserState {
+                time: -song.offset,
+                measure,
+                bpm: song.bpm,
                 hs: 1.0,
                 bar_line: true,
                 gogo: false,
                 renda: None,
-                time: -song.offset,
             },
             balloons: song.balloons.iter().copied().collect(),
         }
@@ -233,7 +231,7 @@ impl ScoreParser<'_> {
             } else if let Some(branch_condition) = take_remaining("#BRANCHSTART", line) {
                 self.branch_start(branch_condition);
             } else if line.starts_with("#BRANCHEND") {
-                self.branch_end();
+                self.branch_end(true);
             } else if line.starts_with("#N") {
                 self.branch_switch(BranchType::Normal);
             } else if line.starts_with("#E") {
@@ -273,6 +271,8 @@ impl ScoreParser<'_> {
     }
 
     fn terminate_measure(&mut self, ignore_notes: bool) {
+        // eprintln!("{:?} {:?} {:?}", self.elements, self.branch_context, self.parser_state);
+
         let notes_count = self
             .elements
             .iter()
@@ -286,10 +286,10 @@ impl ScoreParser<'_> {
         let (parse_notes, parse_tempo) = match &self.branch_context {
             BranchContext::Outside => (true, true),
             BranchContext::Started => {
-                eprintln!(
-                    "Warning: elements between #BRANCHSTART and first #N, #E or #M is deprecated."
-                );
-                eprintln!("The commands will be accepted, while the notes will be ignored.");
+                // eprintln!(
+                //     "Warning: elements between #BRANCHSTART and first #N, #E or #M is deprecated."
+                // );
+                // eprintln!("The commands will be accepted, while the notes will be ignored.");
                 (false, true)
             }
             BranchContext::First(..) => (true, true),
@@ -328,10 +328,11 @@ impl ScoreParser<'_> {
                                 i.saturating_mul(notes_count) <= total.saturating_mul(note_index)
                             })
                     {
+                        // eprintln!("Foreign element {:?} applied", element);
                         // TODO duplicate
                         match element {
-                            TjaElement::BpmChange(bpm) => self.bpm = Bpm(*bpm),
-                            TjaElement::Measure(a, b) => self.measure = Measure(*a, *b),
+                            TjaElement::BpmChange(bpm) => self.parser_state.bpm = Bpm(*bpm),
+                            TjaElement::Measure(a, b) => self.parser_state.measure = Measure(*a, *b),
                             TjaElement::Delay(delay) => self.parser_state.time += delay,
                             _ => {}
                         }
@@ -401,18 +402,19 @@ impl ScoreParser<'_> {
                         });
                     }
                     note_index += 1;
-                    self.parser_state.time += self.measure.get_beat_count()
-                        * self.bpm.beat_duration()
+                    self.parser_state.time += self.parser_state.measure.get_beat_count()
+                        * self.parser_state.bpm.beat_duration()
                         / notes_count as f64;
                 }
-                TjaElement::BpmChange(bpm) if parse_tempo => self.bpm = Bpm(*bpm),
+                TjaElement::BpmChange(bpm) if parse_tempo => self.parser_state.bpm = Bpm(*bpm),
                 TjaElement::Gogo(gogo) => self.parser_state.gogo = *gogo,
-                TjaElement::Measure(a, b) if parse_tempo => self.measure = Measure(*a, *b),
+                TjaElement::Measure(a, b) if parse_tempo => self.parser_state.measure = Measure(*a, *b),
                 TjaElement::Scroll(scroll) => self.parser_state.hs = *scroll,
                 TjaElement::Delay(delay) if parse_tempo => self.parser_state.time += delay,
                 TjaElement::BarLine(bar) => self.parser_state.bar_line = *bar,
                 _ => {
                     // Element was ignored due to illegal syntax in the tja file
+                    // eprintln!("Skipped: {:?}", element);
                 }
             }
             if let BranchContext::First(context) = &mut self.branch_context {
@@ -437,7 +439,7 @@ impl ScoreParser<'_> {
         self.elements.clear();
     }
     fn scroll_speed(&self) -> Bpm {
-        Bpm(self.bpm.0 * self.parser_state.hs)
+        Bpm(self.parser_state.bpm.0 * self.parser_state.hs)
     }
     fn with_scroll_speed(&self, note_content: NoteContent) -> Note {
         Note {
@@ -561,13 +563,14 @@ impl ScoreParser<'_> {
             condition,
             info: (),
         });
-        println!("{} {}\n", judge_time, self.parser_state.time);
+        // println!("{} {}\n", judge_time, self.parser_state.time);
 
         if !matches!(self.branch_context, BranchContext::Outside) {
             eprintln!("#BRANCHSTART was found before branch ends.");
-            self.branch_end();
+            self.branch_end(false);
         }
         self.branch_context = BranchContext::Started;
+        // println!("Start => {:?}", self.branch_context);
     }
 
     fn branch_switch(&mut self, branch_type: BranchType) {
@@ -603,6 +606,7 @@ impl ScoreParser<'_> {
             }
         };
         // println!("{:?} {:?}", branch_type, &self.branch_context);
+        // println!("Switch({:?}) => {:?}", branch_type, self.branch_context);
     }
 
     fn branch_switch_subseqent(
@@ -621,8 +625,10 @@ impl ScoreParser<'_> {
         }
     }
 
-    fn branch_end(&mut self) {
-        self.terminate_measure(false);
+    fn branch_end(&mut self, terminate_measure: bool) {
+        if terminate_measure {
+            self.terminate_measure(false);
+        }
 
         match std::mem::replace(&mut self.branch_context, BranchContext::Outside) {
             BranchContext::Outside => {
@@ -639,6 +645,7 @@ impl ScoreParser<'_> {
                 // TODO should parser state be stored individually for different branches?
             }
         }
+        // println!("Start => {:?}", self.branch_context);
     }
 
     fn section(&mut self) {
