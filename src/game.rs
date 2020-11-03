@@ -120,6 +120,14 @@ pub struct AnimationState {
     flying_notes: VecDeque<FlyingNote>,
     judge_strs: VecDeque<JudgeStr>,
     pub last_combo_update: f64,
+    pub branch_state: BranchAnimationState,
+}
+
+#[derive(Default)]
+pub struct BranchAnimationState {
+    pub switch_time: f64,
+    pub branch_before: BranchType,
+    pub branch_after: BranchType,
 }
 
 impl Note {
@@ -339,7 +347,7 @@ impl GameManager {
         if let Some(branch) = self.score.branches.get_mut(self.next_branch_pointer) {
             if branch.judge_time <= time {
                 let diff = self.game_state - self.game_state_section;
-                branch.info.determined_branch = match branch.condition {
+                let new_branch = match branch.condition {
                     BranchCondition::Pass => None,
                     BranchCondition::Precision(e, m) => {
                         let score = 2 * diff.good_count + diff.ok_count;
@@ -358,8 +366,15 @@ impl GameManager {
                         Self::branch_by_candidate(diff.score, e, m).into()
                     }
                 };
-                dbg!(branch.info.determined_branch);
+                branch.info.determined_branch = new_branch;
                 self.next_branch_pointer += 1;
+
+                let bs = &mut self.animation_state.branch_state;
+                if let Some(new_branch) = new_branch {
+                    bs.branch_before = bs.branch_after;
+                    bs.branch_after = new_branch;
+                    bs.switch_time = time;
+                }
             }
         }
 

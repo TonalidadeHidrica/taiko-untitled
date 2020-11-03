@@ -187,6 +187,12 @@ pub enum BranchType {
     Master,
 }
 
+impl Default for BranchType {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct BranchEvent {
     pub time: f64,

@@ -226,8 +226,23 @@ fn main() -> Result<(), TaikoError> {
             game_manager.as_mut(),
             audio_manager.music_position()?,
         ) {
+            let score_rect = Rect::new(498, 288, 1422, 195);
             // draw score
-            canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
+            canvas.set_clip_rect(score_rect);
+
+            // Branch overleay effect
+            // TODO color for master course is wrong
+            canvas.set_blend_mode(sdl2::render::BlendMode::Add);
+            let bs = &game_manager.animation_state.branch_state;
+            canvas.set_draw_color(interpolate_color(
+                branch_overlay_color(bs.branch_before),
+                branch_overlay_color(bs.branch_after),
+                clamp((music_position - bs.switch_time) * 60.0 / 20.0, 0.0, 1.0),
+            ));
+            canvas
+                .fill_rect(score_rect)
+                .map_err(|e| new_sdl_error("Failed to draw branch overlay", e))?;
+            canvas.set_blend_mode(sdl2::render::BlendMode::None);
 
             // draw bar lines
             let mut bar_lines = EnumMap::<_, Vec<_>>::new();
@@ -523,6 +538,39 @@ fn draw_gauge(
         Rect::new(1799, 215, 71, 63),
     )?;
     Ok(())
+}
+
+fn branch_overlay_color(branch_type: BranchType) -> Color {
+    match branch_type {
+        BranchType::Normal => Color::RGB(0, 0, 0),
+        BranchType::Expert => Color::RGB(8, 38, 55),
+        BranchType::Master => Color::RGB(58, 0, 53),
+    }
+}
+
+fn interpolate_color(color_zero: Color, color_one: Color, t: f64) -> Color {
+    Color::RGBA(
+        clamp(
+            color_zero.r as f64 * (1.0 - t) + color_one.r as f64 * t,
+            0.0,
+            255.0,
+        ) as u8,
+        clamp(
+            color_zero.g as f64 * (1.0 - t) + color_one.g as f64 * t,
+            0.0,
+            255.0,
+        ) as u8,
+        clamp(
+            color_zero.b as f64 * (1.0 - t) + color_one.b as f64 * t,
+            0.0,
+            255.0,
+        ) as u8,
+        clamp(
+            color_zero.a as f64 * (1.0 - t) + color_one.a as f64 * t,
+            0.0,
+            255.0,
+        ) as u8,
+    )
 }
 
 extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) -> i32 {
