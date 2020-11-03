@@ -1,7 +1,4 @@
-use crate::structs::{
-    typed::{NoteContent, QuotaRenda, RendaContent, RendaKind, Score, SingleNote, UnlimitedRenda},
-    *,
-};
+use crate::structs::*;
 use boolinator::Boolinator;
 use enum_map::{enum_map, Enum, EnumMap};
 use itertools::Itertools;
@@ -47,18 +44,19 @@ pub struct BranchState {
     pub determined_branch: Option<BranchType>,
 }
 
-impl SingleNote<OfGameState> {
+impl SingleNote {
     fn corresponds(&self, color: &Option<NoteColor>) -> bool {
         color.as_ref().map_or(false, |c| &self.kind.color == c)
     }
 }
 
-// TODO use define_types macro
-pub type Note = typed::Note<OfGameState>;
-pub type Branch = typed::Branch<OfGameState>;
+// // TODO use define_types macro
+// pub type Note = typed::Note;
+// pub type Branch = typed::Branch;
+define_types!(OfGameState);
 
 pub struct GameManager {
-    pub score: Score<OfGameState>,
+    pub score: Score,
 
     auto: bool,
 
@@ -100,11 +98,7 @@ impl GameState {
         }
     }
 
-    fn update_with_judge<J: Into<JudgeOrPassed>>(
-        &mut self,
-        note: &mut SingleNote<OfGameState>,
-        judge: J,
-    ) {
+    fn update_with_judge<J: Into<JudgeOrPassed>>(&mut self, note: &mut SingleNote, judge: J) {
         let judge = judge.into();
         let was_none = note.info.judge.is_none();
         note.info.judge = Some(judge);
@@ -134,20 +128,20 @@ impl Note {
             scroll_speed: note.scroll_speed.clone(),
             time: note.time,
             content: match &note.content {
-                NoteContent::Single(note) => NoteContent::Single(SingleNote {
+                just::NoteContent::Single(note) => NoteContent::Single(SingleNote {
                     kind: note.kind.clone(),
                     info: SingleNoteInfo {
                         judge: None,
                         gauge_delta: gauge_delta.clone(),
                     },
                 }),
-                NoteContent::Renda(note) => NoteContent::Renda(RendaContent {
+                just::NoteContent::Renda(note) => NoteContent::Renda(RendaContent {
                     kind: match &note.kind {
-                        RendaKind::Unlimited(note) => RendaKind::Unlimited(UnlimitedRenda {
+                        just::RendaKind::Unlimited(note) => RendaKind::Unlimited(UnlimitedRenda {
                             size: note.size.clone(),
                             info: (),
                         }),
-                        RendaKind::Quota(note) => RendaKind::Quota(QuotaRenda {
+                        just::RendaKind::Quota(note) => RendaKind::Quota(QuotaRenda {
                             kind: note.kind.clone(),
                             quota: note.quota,
                             info: Default::default(),
@@ -207,11 +201,11 @@ const OK_WINDOW: f64 = 75.0750045776367 / 1000.0;
 const BAD_WINDOW: f64 = 108.441665649414 / 1000.0;
 
 impl GameManager {
-    pub fn new(score: &Score<()>) -> Self {
+    pub fn new(score: &just::Score) -> Self {
         let combo_count = score
             .notes
             .iter()
-            .filter(|n| matches!(n.content, NoteContent::Single(..)))
+            .filter(|n| matches!(n.content, just::NoteContent::Single(..)))
             .count();
         // TODO change values depending on difficulties
         let good_delta = match combo_count {

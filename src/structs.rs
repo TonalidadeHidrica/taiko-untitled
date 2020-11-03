@@ -194,15 +194,15 @@ pub enum BranchEventKind {
 
 macro_rules! define_types {
     ($ty: ty) => {
-        pub type Score = super::typed::Score<$ty>;
-        pub type Note = super::typed::Note<$ty>;
-        pub type NoteContent = super::typed::NoteContent<$ty>;
-        pub type SingleNote = super::typed::SingleNote<$ty>;
-        pub type RendaContent = super::typed::RendaContent<$ty>;
-        pub type RendaKind = super::typed::RendaKind<$ty>;
-        pub type UnlimitedRenda = super::typed::UnlimitedRenda<$ty>;
-        pub type QuotaRenda = super::typed::QuotaRenda<$ty>;
-        pub type Branch = super::typed::Branch<$ty>;
+        pub type Score = $crate::structs::typed::Score<$ty>;
+        pub type Note = $crate::structs::typed::Note<$ty>;
+        pub type NoteContent = $crate::structs::typed::NoteContent<$ty>;
+        pub type SingleNote = $crate::structs::typed::SingleNote<$ty>;
+        pub type RendaContent = $crate::structs::typed::RendaContent<$ty>;
+        pub type RendaKind = $crate::structs::typed::RendaKind<$ty>;
+        pub type UnlimitedRenda = $crate::structs::typed::UnlimitedRenda<$ty>;
+        pub type QuotaRenda = $crate::structs::typed::QuotaRenda<$ty>;
+        pub type Branch = $crate::structs::typed::Branch<$ty>;
     };
 }
 
