@@ -245,9 +245,21 @@ fn main() -> Result<(), TaikoError> {
             canvas.set_blend_mode(sdl2::render::BlendMode::None);
 
             // draw bar lines
+            let mut branches = game_manager.score.branches.iter().peekable();
+            let mut current_branch = BranchType::Normal;
             let mut bar_lines = EnumMap::<_, Vec<_>>::new();
             for bar_line in &score.bar_lines {
-                if bar_line.visible {
+                while let Some(branch) = branches.peek() {
+                    if branch.switch_time <= bar_line.time {
+                        if let Some(branch) = branch.info.determined_branch {
+                            current_branch = branch;
+                        }
+                        branches.next();
+                    } else {
+                        break;
+                    }
+                }
+                if bar_line.branch.map_or(true, |b| b == current_branch) && bar_line.visible {
                     let x = get_x(music_position, bar_line.time, &bar_line.scroll_speed) as i32;
                     if 0 <= x && x <= 2000 {
                         bar_lines[bar_line.kind].push(Rect::new(x + 96, 288, 3, 195));

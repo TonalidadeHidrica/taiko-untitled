@@ -151,6 +151,7 @@ pub struct BarLine {
     pub scroll_speed: Bpm,
     pub kind: BarLineKind,
     pub visible: bool,
+    pub branch: Option<BranchType>,
 }
 
 #[derive(Clone, Copy, Debug, Enum)]
