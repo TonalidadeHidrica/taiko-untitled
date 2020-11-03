@@ -332,7 +332,9 @@ impl ScoreParser<'_> {
                         // TODO duplicate
                         match element {
                             TjaElement::BpmChange(bpm) => self.parser_state.bpm = Bpm(*bpm),
-                            TjaElement::Measure(a, b) => self.parser_state.measure = Measure(*a, *b),
+                            TjaElement::Measure(a, b) => {
+                                self.parser_state.measure = Measure(*a, *b)
+                            }
                             TjaElement::Delay(delay) => self.parser_state.time += delay,
                             _ => {}
                         }
@@ -408,7 +410,9 @@ impl ScoreParser<'_> {
                 }
                 TjaElement::BpmChange(bpm) if parse_tempo => self.parser_state.bpm = Bpm(*bpm),
                 TjaElement::Gogo(gogo) => self.parser_state.gogo = *gogo,
-                TjaElement::Measure(a, b) if parse_tempo => self.parser_state.measure = Measure(*a, *b),
+                TjaElement::Measure(a, b) if parse_tempo => {
+                    self.parser_state.measure = Measure(*a, *b)
+                }
                 TjaElement::Scroll(scroll) => self.parser_state.hs = *scroll,
                 TjaElement::Delay(delay) if parse_tempo => self.parser_state.time += delay,
                 TjaElement::BarLine(bar) => self.parser_state.bar_line = *bar,
