@@ -411,7 +411,7 @@ impl ScoreParser<'_> {
                                 false => BarLineKind::Normal,
                             },
                             visible: self.parser_state.bar_line,
-                            branch: self.current_branch()
+                            branch: self.current_branch(),
                         });
                         self.parser_state.first_measure_in_branch = false;
                     }
