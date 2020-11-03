@@ -149,7 +149,14 @@ pub struct Measure(pub f64, pub f64);
 pub struct BarLine {
     pub time: f64,
     pub scroll_speed: Bpm,
+    pub kind: BarLineKind,
     pub visible: bool,
+}
+
+#[derive(Clone, Copy, Debug, Enum)]
+pub enum BarLineKind {
+    Normal,
+    Branch,
 }
 
 impl Default for Measure {

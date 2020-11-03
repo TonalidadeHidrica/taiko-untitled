@@ -1,3 +1,4 @@
+use enum_map::EnumMap;
 use itertools::iterate;
 use itertools::Itertools;
 use num::clamp;
@@ -19,7 +20,7 @@ use taiko_untitled::errors::{
 use taiko_untitled::game::{GameManager, Judge};
 use taiko_untitled::structs::{
     typed::{NoteContent, RendaContent, RendaKind},
-    Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
+    BarLineKind, Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
 };
 use taiko_untitled::tja::{load_tja_from_file, Song};
 
@@ -228,44 +229,25 @@ fn main() -> Result<(), TaikoError> {
             // draw score
             canvas.set_clip_rect(Rect::new(498, 288, 1422, 195));
 
-            // draw measure lines
-            let rects = score
-                .bar_lines
-                .iter()
-                .filter_map(|bar_line| {
-                    if bar_line.visible {
-                        let x = get_x(music_position, bar_line.time, &bar_line.scroll_speed) as i32;
-                        if 0 <= x && x <= 2000 {
-                            // TODO magic number depending on 1920
-                            return Some(Rect::new(x + 96, 288, 3, 195));
-                        }
-                    }
-                    None
-                })
-                .collect_vec();
-            canvas.set_draw_color(Color::RGB(200, 200, 200));
-            canvas
-                .fill_rects(&rects[..])
-                .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
-
-            // Draw branch lines
-            // TODO duplicate
-            let rects = score
-                .branches
-                .iter()
-                .filter_map(|bar_line| {
-                    let x =
-                        get_x(music_position, bar_line.switch_time, &bar_line.scroll_speed) as i32;
+            // draw bar lines
+            let mut bar_lines = EnumMap::<_, Vec<_>>::new();
+            for bar_line in &score.bar_lines {
+                if bar_line.visible {
+                    let x = get_x(music_position, bar_line.time, &bar_line.scroll_speed) as i32;
                     if 0 <= x && x <= 2000 {
-                        return Some(Rect::new(x + 96, 288, 3, 195));
+                        bar_lines[bar_line.kind].push(Rect::new(x + 96, 288, 3, 195));
                     }
-                    None
-                })
-                .collect_vec();
-            canvas.set_draw_color(Color::RGB(0xf3, 0xff, 0x55));
-            canvas
-                .fill_rects(&rects[..])
-                .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
+                }
+            }
+            for (kind, rects) in bar_lines {
+                match kind {
+                    BarLineKind::Normal => canvas.set_draw_color(Color::RGB(200, 200, 200)),
+                    BarLineKind::Branch => canvas.set_draw_color(Color::RGB(0xf3, 0xff, 0x55)),
+                };
+                canvas
+                    .fill_rects(&rects[..])
+                    .map_err(|e| new_sdl_error("Failed to draw bar lines", e))?;
+            }
 
             // draw notes
             let mut branches = game_manager.score.branches.iter().rev().peekable();

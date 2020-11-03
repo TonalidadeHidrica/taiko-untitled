@@ -397,9 +397,18 @@ impl ScoreParser<'_> {
                         self.score.notes.push(note);
                     }
                     if note_index == 0 {
+                        let branch_first = match &self.branch_context {
+                            BranchContext::First(context) => context.shared_elements.is_empty(),
+                            BranchContext::Subsequent(context) => context.measure_index == 0,
+                            _ => false,
+                        };
                         self.score.bar_lines.push(BarLine {
                             scroll_speed: self.scroll_speed(),
                             time: self.parser_state.time,
+                            kind: match branch_first {
+                                true => BarLineKind::Branch,
+                                false => BarLineKind::Normal,
+                            },
                             visible: self.parser_state.bar_line,
                         });
                     }
