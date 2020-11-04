@@ -476,7 +476,10 @@ impl GameManager {
                     }
                 }
                 _ if renda.end_time <= time => JudgeOnTimeline::Past,
-                _ if time < note.time => JudgeOnTimeline::Break,
+                _ if time < note.time => match branch_matches {
+                    true => JudgeOnTimeline::Break,
+                    false => JudgeOnTimeline::Continue,
+                },
                 _ => unreachable!(),
             },
         };
