@@ -257,7 +257,7 @@ impl AudioThreadState {
 
             receiver_to_audio,
             playing: false,
-            played_sample_count: 0,
+            played_sample_count: 44100 * 80,
             playback_position_ptr,
             music_volume: 1.0,
         }
@@ -363,10 +363,11 @@ impl AudioThreadState {
             message: "Failed to open music file".to_string(),
             cause: TaikoErrorCause::AudioLoadError(e),
         })?;
-        let decoder = rodio::Decoder::new(BufReader::new(file)).map_err(|e| TaikoError {
+        let mut decoder = rodio::Decoder::new(BufReader::new(file)).map_err(|e| TaikoError {
             message: "Failed to decode music".to_string(),
             cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::DecoderError(e)),
         })?;
+        let _ = decoder.by_ref().skip(44100 * 80 * 2 - 1).next();
 
         let ret = new_uniform_source_iterator(decoder, &self.stream_config);
         Ok(ret)
