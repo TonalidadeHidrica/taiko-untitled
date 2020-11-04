@@ -234,8 +234,6 @@ impl GameManager {
             Judge::Ok => (good_delta / 2.0).trunc(),
             Judge::Bad => -good_delta * 2.0,
         ];
-        // score.branches.iter().enumerate().for_each(|(i, v)| println!("{}\t{}\t{:?}", i, v.switch_time, v));
-        // score.notes.iter().enumerate().for_each(|(i, v)| println!("{}\t{}\t{:?}", i, v.time, v));
         Self {
             score: Score {
                 notes: score
@@ -402,11 +400,7 @@ impl GameManager {
             ..
         } = self;
 
-        print!("{:.3} {:10?} {:5} ", time, color, judge_pointer);
-
-        let check_note = |note: &mut Note, branch_matches: bool| {
-            print!("{:?} {:?}\n                                 ", note, branch_matches);
-            match note.content {
+        let check_note = |note: &mut Note, branch_matches: bool| match note.content {
             NoteContent::Single(ref mut single_note) => match note.time - time {
                 t if t.abs() <= OK_WINDOW => {
                     if single_note.info.judge.is_none()
@@ -428,8 +422,6 @@ impl GameManager {
                             .judge_strs
                             .push_back(JudgeStr { time, judge });
                         animation_state.last_combo_update = time;
-
-                        print!("{:6?} {:?}", judge, note);
 
                         JudgeOnTimeline::BreakWith(())
                     } else {
@@ -484,13 +476,10 @@ impl GameManager {
                     }
                 }
                 _ if renda.end_time <= time => JudgeOnTimeline::Past,
-                _ if time < note.time => match branch_matches {
-                    true => JudgeOnTimeline::Break,
-                    false => JudgeOnTimeline::Continue,
-                }
+                _ if time < note.time => JudgeOnTimeline::Break,
                 _ => unreachable!(),
             },
-        }};
+        };
         let first_hit_check = Self::check_note_wrapper(
             notes,
             branches,
@@ -513,8 +502,6 @@ impl GameManager {
                             animation_state
                                 .judge_strs
                                 .push_back(JudgeStr { time, judge });
-                            print!("{:6?} {:?}", judge, note);
-
                             JudgeOnTimeline::BreakWith(())
                         } else {
                             JudgeOnTimeline::Continue
@@ -537,8 +524,6 @@ impl GameManager {
                 check_note_bad,
             )
             .is_some();
-
-        println!();
     }
 
     pub fn flying_notes<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &FlyingNote>
