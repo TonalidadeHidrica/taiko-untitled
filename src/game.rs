@@ -208,18 +208,27 @@ const GOOD_WINDOW: f64 = 25.0250015258789 / 1000.0;
 const OK_WINDOW: f64 = 75.0750045776367 / 1000.0;
 const BAD_WINDOW: f64 = 108.441665649414 / 1000.0;
 
+fn get_gauge_good_delta(score: &just::Score) -> f64 {
+    let mut counts = EnumMap::<_, usize>::new();
+    for note in &score.notes {
+        if let just::NoteContent::Single(..) = note.content {
+            match note.branch {
+                Some(branch) => counts[branch] += 1,
+                None => counts.values_mut().for_each(|v| *v += 1),
+            }
+        }
+    }
+    let combo_count = counts.values().max().unwrap();
+    // TODO change values depending on difficulties
+    match *combo_count {
+        n if n >= 1 => (13113.0 / n as f64).round(),
+        _ => 0.0,
+    }
+}
+
 impl GameManager {
     pub fn new(score: &just::Score) -> Self {
-        let combo_count = score
-            .notes
-            .iter()
-            .filter(|n| matches!(n.content, just::NoteContent::Single(..)))
-            .count();
-        // TODO change values depending on difficulties
-        let good_delta = match combo_count {
-            n if n >= 1 => (13113.0 / n as f64).round(),
-            _ => 0.0,
-        };
+        let good_delta = get_gauge_good_delta(score);
         let gauge_delta = enum_map![
             Judge::Good => good_delta,
             Judge::Ok => (good_delta / 2.0).trunc(),
