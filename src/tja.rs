@@ -11,7 +11,8 @@ use std::fs::File;
 use std::io;
 use std::io::{Error, Read};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 #[derive(Debug)]
 pub enum TjaError {
@@ -847,11 +848,119 @@ trait ParseFirst<V> {
     fn parse_first(self: Self) -> Option<V>;
 }
 
-impl<V> ParseFirst<V> for &str
-where
-    V: FromStr,
-{
-    fn parse_first(self) -> Option<V> {
-        self.trim().parse().ok()
+impl ParseFirst<f64> for &str {
+    fn parse_first(self: Self) -> Option<f64> {
+        static PATTERN: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(
+                r"(?ix)
+                    ^\s*
+                    (?P<value>
+                        [+-]?
+                        (
+                            # inf|nan|
+                            (
+                                  [0-9]+\.[0-9]*
+                                | [0-9]*\.[0-9]+
+                                | [0-9]+
+                            )
+                            (e [+-]? [0-9]+)?
+                        )
+                    )
+                "
+            ).unwrap()
+        });
+        PATTERN.captures(self)?["value"].parse().ok()
+    }
+}
+
+static INTEGER_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?x)
+            ^\s*
+            (?P<value>
+                [+-]? [0-9]+
+            )
+        "
+    ).unwrap()
+});
+
+macro_rules! parse_integer {
+    ($($t: ty)*) => {
+        $(
+            impl ParseFirst<$t> for &str {
+                fn parse_first(self: Self) -> Option<$t> {
+                    INTEGER_PATTERN.captures(self)?["value"].parse().ok()
+                }
+            }
+        )*
+    }
+}
+parse_integer!(u64 u32 i64);
+
+#[cfg(test)]
+mod tests {
+    use super::ParseFirst;
+
+    #[test]
+    fn test_parse_f64() {
+        assert_eq!("3.14".parse_first(), Some(3.14));
+        assert_eq!("-3.14".parse_first(), Some(-3.14));
+        assert_eq!("2.5E10".parse_first(), Some(2.5e10));
+        assert_eq!("2.5e10".parse_first(), Some(2.5e10));
+        assert_eq!("2.5E-10".parse_first(), Some(2.5e-10));
+        assert_eq!("5".parse_first(), Some(5.0));
+        assert_eq!("5.".parse_first(), Some(5.0));
+        assert_eq!(".5".parse_first(), Some(0.5));
+        assert_eq!("0.5".parse_first(), Some(0.5));
+
+        assert_eq!("inf".parse_first(), None as Option<f64>);
+        assert_eq!("-inf".parse_first(), None as Option<f64>);
+        assert_eq!("NaN".parse_first(), None as Option<f64>);
+
+        assert_eq!("  3.14".parse_first(), Some(3.14));
+        assert_eq!("      -3.14".parse_first(), Some(-3.14));
+        assert_eq!("  \t\t\t2.5E10".parse_first(), Some(2.5e10));
+        assert_eq!("  \t \t  2.5e10".parse_first(), Some(2.5e10));
+
+        assert_eq!("  3.14abc".parse_first(), Some(3.14));
+        assert_eq!("      -3.14e".parse_first(), Some(-3.14));
+        assert_eq!("  \t\t\t2.5E10//".parse_first(), Some(2.5e10));
+        assert_eq!("  \t \t  2.5e10e".parse_first(), Some(2.5e10));
+        assert_eq!("  5.2.3.1".parse_first(), Some(5.2));
+        assert_eq!("  120 //180".parse_first(), Some(120.0));
+    }
+
+    #[test]
+    fn test_parse_u64() {
+        assert_eq!("0".parse_first(), Some(0u64));
+        assert_eq!("1234".parse_first(), Some(1234u64));
+        assert_eq!("2147483648".parse_first(), Some(2147483648u64));
+
+        assert_eq!("-0".parse_first(), None as Option<u64>);
+        assert_eq!("-1234".parse_first(), None as Option<u64>);
+        assert_eq!("-2147483648".parse_first(), None as Option<u64>);
+
+        assert_eq!("a".parse_first(), None as Option<u64>);
+
+        assert_eq!("   123".parse_first(), Some(123u64));
+        assert_eq!("  \t123e2".parse_first(), Some(123u64));
+        assert_eq!("  \t123//456".parse_first(), Some(123u64));
+    }
+
+    #[test]
+    fn test_parse_i64() {
+        assert_eq!("0".parse_first(), Some(0i64));
+        assert_eq!("1234".parse_first(), Some(1234i64));
+        assert_eq!("2147483648".parse_first(), Some(2147483648i64));
+
+        assert_eq!("-0".parse_first(), Some(0i64));
+        assert_eq!("-1234".parse_first(), Some(-1234i64));
+        assert_eq!("-2147483648".parse_first(), Some(-2147483648i64));
+
+        assert_eq!("a".parse_first(), None as Option<i64>);
+
+        assert_eq!("   123".parse_first(), Some(123i64));
+        assert_eq!("  \t123e2".parse_first(), Some(123i64));
+        assert_eq!("  \t123//456".parse_first(), Some(123i64));
     }
 }
