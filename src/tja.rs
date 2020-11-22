@@ -4,15 +4,15 @@ use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use enum_map::EnumMap;
 use itertools::Itertools;
+use once_cell::sync::Lazy;
 use ordered_float::OrderedFloat;
+use regex::Regex;
 use std::cmp::{max, min};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io;
 use std::io::{Error, Read};
 use std::path::{Path, PathBuf};
-use once_cell::sync::Lazy;
-use regex::Regex;
 
 #[derive(Debug)]
 pub enum TjaError {
@@ -866,8 +866,9 @@ impl ParseFirst<f64> for &str {
                             (e [+-]? [0-9]+)?
                         )
                     )
-                "
-            ).unwrap()
+                ",
+            )
+            .unwrap()
         });
         PATTERN.captures(self)?["value"].parse().ok()
     }
@@ -880,8 +881,9 @@ static INTEGER_PATTERN: Lazy<Regex> = Lazy::new(|| {
             (?P<value>
                 [+-]? [0-9]+
             )
-        "
-    ).unwrap()
+        ",
+    )
+    .unwrap()
 });
 
 macro_rules! parse_integer {
