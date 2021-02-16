@@ -135,6 +135,7 @@ impl AudioManager {
             })
     }
 
+    /// Returns error only if the audio stream has been pannicked.
     pub fn music_position(&self) -> Result<Option<f64>, TaikoError> {
         let playback_position = self.playback_position.lock().map_err(|_| TaikoError {
             message: "Failed to obtain music position; the audio stream has been panicked"

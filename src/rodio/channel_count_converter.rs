@@ -1,5 +1,3 @@
-use cpal;
-
 /// Iterator that converts from a certain channel count to another.
 #[derive(Clone, Debug)]
 pub struct ChannelCountConverter<I>
