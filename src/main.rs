@@ -195,6 +195,12 @@ fn main() -> Result<(), TaikoError> {
                             audio_manager.set_play_scheduled(auto)?;
                         }
                     }
+                    Keycode::PageUp => if let Some(music_position) = music_position {
+                        audio_manager.seek(music_position + 1.0)?;
+                    },
+                    Keycode::PageDown => if let Some(music_position) = music_position {
+                        audio_manager.seek(music_position - 1.0)?;
+                    },
                     _ => {}
                 },
                 _ => {}
@@ -314,6 +320,7 @@ fn main() -> Result<(), TaikoError> {
                                 &assets.textures.renda_large_right,
                             ),
                         };
+                        // TODO coordinates calculations may lead to overflows
                         let xs = get_x(music_position, note.time, &note.scroll_speed) as i32;
                         let xt = get_x(music_position, *end_time, &note.scroll_speed) as i32;
                         canvas

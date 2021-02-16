@@ -36,6 +36,7 @@ enum PlaybackPosition {
 enum MessageToAudio {
     Play,
     Pause,
+    Seek(f64),
     LoadMusic(PathBuf),
     SetMusicVolume(f32),
     AddPlay(SoundBufferSource),
@@ -106,6 +107,15 @@ impl AudioManager {
             .send(MessageToAudio::Pause)
             .map_err(|_| TaikoError {
                 message: "Failed to pause music; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn seek(&self, time: f64) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::Seek(time))
+            .map_err(|_| TaikoError {
+                message: "Failed to seek; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -269,6 +279,7 @@ struct AudioThreadState {
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
     played_sample_count: usize,
+    skip_sample_count: usize,
     playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     music_volume: f32,
 }
@@ -295,6 +306,7 @@ impl AudioThreadState {
             receiver_to_audio,
             playing: false,
             played_sample_count: 0,
+            skip_sample_count: 0,
             playback_position_ptr,
             music_volume: 1.0,
         }
@@ -310,7 +322,34 @@ impl AudioThreadState {
                     MessageToAudio::Play => self.playing = true,
                     MessageToAudio::Pause => {
                         self.playing = false;
-                        self.send_pause_state();
+                        self.update_pause_state();
+                    }
+                    MessageToAudio::Seek(time) => {
+                        // TODO refactoring
+                        if let Err(e) = if let (Some(music), false) = (&mut self.music, false) {
+                            match music.seek(time.max(0.0)).map_err(|e| TaikoError {
+                                message: e,
+                                cause: TaikoErrorCause::None,
+                            }) {
+                                Ok(sample_count) => {
+                                    self.skip_sample_count = (-time.min(0.0)
+                                        * self.stream_config.sample_rate.0 as f64)
+                                        as usize
+                                        * (self.stream_config.channels as usize);
+                                    self.played_sample_count = sample_count as usize;
+                                    self.update_pause_state();
+                                    Ok(())
+                                }
+                                Err(e) => Err(e),
+                            }
+                        } else {
+                            Err(TaikoError {
+                                message: "Music is empty or playing".to_owned(),
+                                cause: TaikoErrorCause::None,
+                            })
+                        } {
+                            println!("Failed to seek: {:?}", e);
+                        }
                     }
                     MessageToAudio::LoadMusic(path) => {
                         // TODO send error via another channel
@@ -374,12 +413,21 @@ impl AudioThreadState {
                     self.sound_effects.push(source);
                 }
 
-                self.played_sample_count += playing_sample_count;
+                // TODO: SPAGHETTI CODE!
+                self.played_sample_count += output.len().saturating_sub(self.skip_sample_count)
+                    / (self.stream_config.channels as usize)
             }
 
             for out in output.iter_mut() {
                 let mut next = match &mut self.music {
-                    Some(music) if self.playing => music.next().map(|a| a * self.music_volume),
+                    Some(music) if self.playing => {
+                        if self.skip_sample_count > 0 {
+                            self.skip_sample_count -= 1;
+                            None
+                        } else {
+                            music.next().map(|a| a * self.music_volume)
+                        }
+                    }
                     _ => None,
                 }
                 .unwrap_or(0.0);
@@ -396,7 +444,7 @@ impl AudioThreadState {
         }
     }
 
-    fn send_pause_state(&self) {
+    fn update_pause_state(&self) {
         if let Some(playback_position) = self.playback_position_ptr.upgrade() {
             let mut playback_position = playback_position
                 .lock()
@@ -409,7 +457,9 @@ impl AudioThreadState {
     }
 
     fn music_position_start(&self) -> f64 {
-        self.played_sample_count as f64 / self.stream_config.sample_rate.0 as f64
+        let sample_index = self.played_sample_count as isize
+            - self.skip_sample_count as isize / self.stream_config.channels as isize;
+        sample_index as f64 / self.stream_config.sample_rate.0 as f64
     }
 
     pub fn load_music(&self, wave: PathBuf) -> Result<MusicSource, TaikoError> {

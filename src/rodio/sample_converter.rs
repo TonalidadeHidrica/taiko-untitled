@@ -1,4 +1,4 @@
-use super::seek::{SeekResult, Seekable};
+use super::seek::Seekable;
 use std::collections::VecDeque;
 
 pub struct TrueSampleConverter<S>
@@ -66,9 +66,14 @@ where
     }
 
     /// if time < 0, then seek to 0
-    pub fn seek(&mut self, time: f64) -> SeekResult {
-        let target_sample = time * self.input_sample_rate;
-        self.source.seek(target_sample as u64)
+    pub fn seek(&mut self, time: f64) -> Result<u64, String> {
+        let time = time.max(0.0);
+        self.input_front_sample_index = (time * self.input_sample_rate) as u64;
+        self.output_next_sample_index = (time * self.output_sample_rate) as u64;
+        self.input_samples_queue.clear();
+        self.output_samples_queue.clear();
+        self.source.seek(self.input_front_sample_index as u64)?;
+        Ok(self.output_next_sample_index)
     }
 }
 
@@ -82,6 +87,7 @@ where
         if let Some(next) = self.output_samples_queue.pop_front() {
             Some(next)
         } else {
+            // TODO there may be a precision issue here (although after very long).
             let next_index = self.output_next_sample_index as f64 / self.output_sample_rate
                 * self.input_sample_rate;
             let int = next_index.trunc() as u64;
