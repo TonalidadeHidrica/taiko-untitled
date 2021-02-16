@@ -19,16 +19,23 @@ pub struct AudioManager {
     pub stream_config: StreamConfig,
     sender_to_audio: Sender<MessageToAudio>,
     drop_sender: Sender<()>,
-    playback_position: Arc<Mutex<Option<PlaybackPosition>>>,
+    playback_position: Arc<Mutex<PlaybackPosition>>,
 }
 
-struct PlaybackPosition {
-    instant: Instant,
-    music_position: f64,
+enum PlaybackPosition {
+    NotStarted,
+    Paused {
+        music_position: f64
+    },
+    Playing {
+        instant: Instant,
+        music_position: f64,
+    }
 }
 
 enum MessageToAudio {
     Play,
+    Pause,
     LoadMusic(PathBuf),
     SetMusicVolume(f32),
     AddPlay(SoundBufferSource),
@@ -41,7 +48,7 @@ impl AudioManager {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
         let (stream_config_sender, stream_config_receiver) = mpsc::channel();
         let (drop_sender, drop_receiver) = mpsc::channel();
-        let playback_position = Arc::new(Mutex::new(None));
+        let playback_position = Arc::new(Mutex::new(PlaybackPosition::NotStarted));
 
         let playback_position_ptr = Arc::downgrade(&playback_position);
         thread::spawn(
@@ -94,6 +101,24 @@ impl AudioManager {
             })
     }
 
+    pub fn pause(&self) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::Pause)
+            .map_err(|_| TaikoError {
+                message: "Failed to pause music; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn playing(&self) -> Result<bool, TaikoError> {
+        let playback_position = self.playback_position.lock().map_err(|_| TaikoError {
+            message: "Failed to obtain music position; the audio stream has been panicked"
+                .to_string(),
+            cause: TaikoErrorCause::None,
+        })?;
+        Ok(matches!(*playback_position, PlaybackPosition::Playing { .. }))
+    }
+
     pub fn set_music_volume(&self, volume: f32) -> Result<(), TaikoError> {
         self.sender_to_audio
             .send(MessageToAudio::SetMusicVolume(volume))
@@ -142,21 +167,27 @@ impl AudioManager {
                 .to_string(),
             cause: TaikoErrorCause::None,
         })?;
-        Ok(playback_position.as_ref().map(|playback_position| {
-            let now = Instant::now();
-            let diff = if now > playback_position.instant {
-                (now - playback_position.instant).as_secs_f64()
-            } else {
-                -(playback_position.instant - now).as_secs_f64()
-            };
-            diff + playback_position.music_position
-        }))
+        use PlaybackPosition::*;
+        let res = match *playback_position {
+            Playing { music_position, instant } => {
+                let now = Instant::now();
+                let diff = if now > instant {
+                    (now - instant).as_secs_f64()
+                } else {
+                    -(instant - now).as_secs_f64()
+                };
+                Some(diff + music_position)
+            },
+            Paused { music_position } => Some(music_position),
+            NotStarted => None,
+        };
+        Ok(res)
     }
 }
 
 fn stream_thread(
     receiver_to_audio: Receiver<MessageToAudio>,
-    playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
+    playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
 ) -> Result<(StreamConfig, Stream), TaikoError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or_else(|| TaikoError {
@@ -232,7 +263,7 @@ struct AudioThreadState {
     receiver_to_audio: mpsc::Receiver<MessageToAudio>,
     playing: bool,
     played_sample_count: usize,
-    playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
+    playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     music_volume: f32,
 }
 
@@ -245,7 +276,7 @@ impl AudioThreadState {
     pub fn new(
         stream_config: StreamConfig,
         receiver_to_audio: mpsc::Receiver<MessageToAudio>,
-        playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
+        playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     ) -> Self {
         AudioThreadState {
             stream_config,
@@ -271,6 +302,10 @@ impl AudioThreadState {
             for message in self.receiver_to_audio.try_iter() {
                 match message {
                     MessageToAudio::Play => self.playing = true,
+                    MessageToAudio::Pause => {
+                        self.playing = false;
+                        self.send_pause_state();
+                    }
                     MessageToAudio::LoadMusic(path) => {
                         // TODO send error via another channel
                         self.music = Some(self.load_music(path).unwrap())
@@ -302,8 +337,7 @@ impl AudioThreadState {
 
                 let playing_sample_count = output.len() / (self.stream_config.channels as usize);
 
-                let music_position_start =
-                    self.played_sample_count as f64 / self.stream_config.sample_rate.0 as f64;
+                let music_position_start = self.music_position_start();
                 let music_position_end = (self.played_sample_count + playing_sample_count) as f64
                     / self.stream_config.sample_rate.0 as f64;
 
@@ -312,10 +346,10 @@ impl AudioThreadState {
                         .lock()
                         .map_err(|e| format!("The main thread has been panicked: {}", e))
                         .unwrap(); // Intentionally panic when error
-                    *playback_position = Some(PlaybackPosition {
+                    *playback_position = PlaybackPosition::Playing {
                         instant,
                         music_position: music_position_start,
-                    });
+                    };
                 }
 
                 while let Some(next) = self.sound_effect_schedules.front() {
@@ -338,11 +372,9 @@ impl AudioThreadState {
             }
 
             for out in output.iter_mut() {
-                let mut next = if let (Some(ref mut music), true) = (&mut self.music, self.playing)
-                {
-                    music.next().map(|a| a * self.music_volume)
-                } else {
-                    None
+                let mut next = match &mut self.music {
+                    Some(music) if self.playing => music.next().map(|a| a * self.music_volume),
+                    _ => None,
                 }
                 .unwrap_or(0.0);
 
@@ -356,6 +388,22 @@ impl AudioThreadState {
                 *out = S::from(&next);
             }
         }
+    }
+
+    fn send_pause_state(&self) {
+        if let Some(playback_position) = self.playback_position_ptr.upgrade() {
+            let mut playback_position = playback_position
+                .lock()
+                .map_err(|e| format!("The main thread has been panicked: {}", e))
+                .unwrap(); // Intentionally panic when error
+            *playback_position = PlaybackPosition::Paused {
+                music_position: self.music_position_start()
+            };
+        }
+    }
+
+    fn music_position_start(&self) -> f64 {
+        self.played_sample_count as f64 / self.stream_config.sample_rate.0 as f64
     }
 
     pub fn load_music(&self, wave: PathBuf) -> Result<MusicSource, TaikoError> {

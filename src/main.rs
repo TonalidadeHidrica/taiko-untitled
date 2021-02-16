@@ -2,11 +2,14 @@ use enum_map::EnumMap;
 use itertools::iterate;
 use itertools::Itertools;
 use num::clamp;
-use sdl2::event::{Event, EventType};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
+use sdl2::{
+    event::{Event, EventType},
+    keyboard::Mod,
+};
 use std::convert::TryFrom;
 use std::ffi::c_void;
 use std::iter;
@@ -161,29 +164,28 @@ fn main() -> Result<(), TaikoError> {
                     repeat: false,
                     keycode: Some(keycode),
                     timestamp,
+                    keymod,
                     ..
                 } => match keycode {
                     Keycode::Z
                     | Keycode::X
                     | Keycode::Slash
                     | Keycode::Underscore
-                    | Keycode::Backslash => {
-                        let color = match keycode {
-                            Keycode::X | Keycode::Slash => NoteColor::Don,
-                            Keycode::Z | Keycode::Underscore | Keycode::Backslash => NoteColor::Ka,
-                            _ => unreachable!(),
-                        };
-                        if let (Some(game_manager), Some(music_position)) =
-                            (game_manager.as_mut(), music_position)
-                        {
-                            game_manager.hit(
-                                Some(color),
-                                music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
-                            );
-                        }
+                    | Keycode::Backslash if audio_manager.playing()? => {
+                        process_key_event(
+                            keycode,
+                            &mut game_manager,
+                            music_position,
+                            timestamp,
+                            sdl_timestamp,
+                        );
                     }
                     Keycode::Space => {
-                        audio_manager.play()?;
+                        if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) {
+                            audio_manager.pause()?;
+                        } else {
+                            audio_manager.play()?;
+                        }
                     }
                     Keycode::F1 => {
                         if let Some(ref mut game_manager) = game_manager {
@@ -446,6 +448,26 @@ fn main() -> Result<(), TaikoError> {
     }
 
     Ok(())
+}
+
+fn process_key_event(
+    keycode: Keycode,
+    game_manager: &mut Option<GameManager>,
+    music_position: Option<f64>,
+    timestamp: u32,
+    sdl_timestamp: u32,
+) {
+    let color = match keycode {
+        Keycode::X | Keycode::Slash => NoteColor::Don,
+        Keycode::Z | Keycode::Underscore | Keycode::Backslash => NoteColor::Ka,
+        _ => unreachable!(),
+    };
+    if let (Some(game_manager), Some(music_position)) = (game_manager.as_mut(), music_position) {
+        game_manager.hit(
+            Some(color),
+            music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
+        );
+    }
 }
 
 fn get_x(music_position: f64, time: f64, scroll_speed: &Bpm) -> f64 {
