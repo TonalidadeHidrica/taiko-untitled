@@ -1,6 +1,7 @@
 use super::channel_count_converter::ChannelCountConverter;
 use super::data_converter::DataConverter;
 use super::sample_converter::TrueSampleConverter;
+use super::seek::Seekable;
 use cpal::StreamConfig;
 use rodio::{Sample, Source};
 
@@ -12,7 +13,7 @@ pub fn new_uniform_source_iterator<S>(
     stream_config: &StreamConfig,
 ) -> TrueUniformSourceIterator<S>
 where
-    S: Source,
+    S: Source + Seekable,
     S::Item: Sample + cpal::Sample,
 {
     let input_sample_rate = source.sample_rate();

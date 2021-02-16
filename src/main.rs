@@ -171,7 +171,9 @@ fn main() -> Result<(), TaikoError> {
                     | Keycode::X
                     | Keycode::Slash
                     | Keycode::Underscore
-                    | Keycode::Backslash if audio_manager.playing()? => {
+                    | Keycode::Backslash
+                        if audio_manager.playing()? =>
+                    {
                         process_key_event(
                             keycode,
                             &mut game_manager,

@@ -1,8 +1,9 @@
+use super::seek::{SeekResult, Seekable};
 use std::collections::VecDeque;
 
 pub struct TrueSampleConverter<S>
 where
-    S: Iterator<Item = f32>,
+    S: Iterator<Item = f32> + Seekable,
 {
     source: S,
     channels: u16,
@@ -17,7 +18,7 @@ where
 
 impl<S> TrueSampleConverter<S>
 where
-    S: Iterator<Item = f32>,
+    S: Iterator<Item = f32> + Seekable,
 {
     pub fn new(
         source: S,
@@ -63,11 +64,17 @@ where
         let index_delta = (sample_index - self.input_front_sample_index) as usize;
         self.input_samples_queue[index_delta * self.channels as usize + channel_index as usize]
     }
+
+    /// if time < 0, then seek to 0
+    pub fn seek(&mut self, time: f64) -> SeekResult {
+        let target_sample = time * self.input_sample_rate;
+        self.source.seek(target_sample as u64)
+    }
 }
 
 impl<S> Iterator for TrueSampleConverter<S>
 where
-    S: Iterator<Item = f32>,
+    S: Iterator<Item = f32> + Seekable,
 {
     type Item = S::Item;
 

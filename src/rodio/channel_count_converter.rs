@@ -1,8 +1,10 @@
+use super::seek::{SeekResult, Seekable};
+
 /// Iterator that converts from a certain channel count to another.
 #[derive(Clone, Debug)]
 pub struct ChannelCountConverter<I>
 where
-    I: Iterator,
+    I: Iterator + Seekable,
 {
     input: I,
     from: cpal::ChannelCount,
@@ -13,7 +15,7 @@ where
 
 impl<I> ChannelCountConverter<I>
 where
-    I: Iterator,
+    I: Iterator + Seekable,
 {
     /// Initializes the iterator.
     ///
@@ -45,7 +47,7 @@ where
 
 impl<I> Iterator for ChannelCountConverter<I>
 where
-    I: Iterator,
+    I: Iterator + Seekable,
     I::Item: Clone,
 {
     type Item = I::Item;
@@ -92,7 +94,16 @@ where
 
 impl<I> ExactSizeIterator for ChannelCountConverter<I>
 where
-    I: ExactSizeIterator,
+    I: ExactSizeIterator + Seekable,
     I::Item: Clone,
 {
+}
+
+impl<I> Seekable for ChannelCountConverter<I>
+where
+    I: Iterator + Seekable,
+{
+    fn seek(&mut self, sample: u64) -> SeekResult {
+        self.input.seek(sample)
+    }
 }

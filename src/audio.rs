@@ -25,12 +25,12 @@ pub struct AudioManager {
 enum PlaybackPosition {
     NotStarted,
     Paused {
-        music_position: f64
+        music_position: f64,
     },
     Playing {
         instant: Instant,
         music_position: f64,
-    }
+    },
 }
 
 enum MessageToAudio {
@@ -116,7 +116,10 @@ impl AudioManager {
                 .to_string(),
             cause: TaikoErrorCause::None,
         })?;
-        Ok(matches!(*playback_position, PlaybackPosition::Playing { .. }))
+        Ok(matches!(
+            *playback_position,
+            PlaybackPosition::Playing { .. }
+        ))
     }
 
     pub fn set_music_volume(&self, volume: f32) -> Result<(), TaikoError> {
@@ -169,7 +172,10 @@ impl AudioManager {
         })?;
         use PlaybackPosition::*;
         let res = match *playback_position {
-            Playing { music_position, instant } => {
+            Playing {
+                music_position,
+                instant,
+            } => {
                 let now = Instant::now();
                 let diff = if now > instant {
                     (now - instant).as_secs_f64()
@@ -177,7 +183,7 @@ impl AudioManager {
                     -(instant - now).as_secs_f64()
                 };
                 Some(diff + music_position)
-            },
+            }
             Paused { music_position } => Some(music_position),
             NotStarted => None,
         };
@@ -397,7 +403,7 @@ impl AudioThreadState {
                 .map_err(|e| format!("The main thread has been panicked: {}", e))
                 .unwrap(); // Intentionally panic when error
             *playback_position = PlaybackPosition::Paused {
-                music_position: self.music_position_start()
+                music_position: self.music_position_start(),
             };
         }
     }
@@ -415,7 +421,6 @@ impl AudioThreadState {
             message: "Failed to decode music".to_string(),
             cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::DecoderError(e)),
         })?;
-
         let ret = new_uniform_source_iterator(decoder, &self.stream_config);
         Ok(ret)
     }

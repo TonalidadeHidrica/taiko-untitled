@@ -1,3 +1,4 @@
+use super::seek::{SeekResult, Seekable};
 use cpal::Sample as CpalSample;
 use rodio::Sample;
 use std::marker::PhantomData;
@@ -51,4 +52,13 @@ where
     I::Item: Sample + CpalSample,
     O: Sample + CpalSample,
 {
+}
+
+impl<I, O> Seekable for DataConverter<I, O>
+where
+    I: Seekable,
+{
+    fn seek(&mut self, sample: u64) -> SeekResult {
+        self.input.seek(sample)
+    }
 }
