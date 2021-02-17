@@ -1,5 +1,5 @@
 use crate::assets::Assets;
-use crate::audio::{AudioManager, SoundBuffer, SoundEffectSchedule};
+use crate::audio::{AudioManager, SoundEffectSchedule};
 use crate::config::TaikoConfig;
 use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError, TaikoErrorCause};
 use crate::game_graphics::{
@@ -17,13 +17,13 @@ use crate::tja::load_tja_from_file;
 use crate::utils::to_digits;
 use itertools::{iterate, Itertools};
 use num::clamp;
-use sdl2::event::{Event, EventType};
+use sdl2::event::Event;
+use sdl2::event::EventWatch;
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
-use sdl2::{EventPump, TimerSubsystem};
-use std::convert::{TryFrom, TryInto};
-use std::ffi::c_void;
+use sdl2::{EventPump, EventSubsystem, TimerSubsystem};
+use std::convert::TryInto;
 use std::iter;
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
@@ -34,6 +34,7 @@ type ScoreOfGameState = TypedScore<OfGameState>;
 pub fn game<P>(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
+    event_subsystem: &EventSubsystem,
     event_pump: &mut EventPump,
     timer_subsystem: &mut TimerSubsystem,
     audio_manager: &AudioManager,
@@ -50,25 +51,12 @@ where
         cause: TaikoErrorCause::None,
     })?;
 
-    setup_audio_manager(&audio_manager, &assets, &score, song.wave.clone())?;
+    setup_audio_manager(audio_manager, assets, score, song.wave)?;
+    let _sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
 
     let mut game_manager = GameManager::new(&score);
 
-    let mut event_callback_tuple = (
-        audio_manager,
-        &assets.chunks.sound_don.clone(),
-        &assets.chunks.sound_ka.clone(),
-    );
-    unsafe {
-        // variables `audio_manager` and `assets` are valid
-        // while this main function exists on the stack.
-        sdl2_sys::SDL_AddEventWatch(
-            Some(callback),
-            &mut event_callback_tuple as *mut _ as *mut c_void,
-        );
-    }
-
-    let ret = loop {
+    loop {
         if let Some(res) = game_loop(
             config,
             canvas,
@@ -82,16 +70,7 @@ where
             #[allow(clippy::unit_arg)]
             break Ok(res);
         }
-    };
-
-    unsafe {
-        sdl2_sys::SDL_DelEventWatch(
-            Some(callback),
-            &mut event_callback_tuple as *mut _ as *mut c_void,
-        );
     }
-
-    ret
 }
 
 // TODO too many parameters
@@ -250,6 +229,35 @@ where
     audio_manager.add_play_schedules(generate_schedules(&score, assets))?;
     audio_manager.play()?;
     Ok(())
+}
+
+fn setup_sound_effect<'e, 'au, 'at>(
+    event_subsystem: &'e EventSubsystem,
+    audio_manager: &'au AudioManager,
+    assets: &'at Assets,
+) -> EventWatch<'au, impl FnMut(Event) -> () + 'au> {
+    let sound_don = assets.chunks.sound_don.clone();
+    let sound_ka = assets.chunks.sound_ka.clone();
+    event_subsystem.add_event_watch(move |event| {
+        if let Event::KeyDown {
+            keycode: Some(keycode),
+            repeat: false,
+            ..
+        } = event
+        {
+            match keycode {
+                Keycode::X | Keycode::Slash => {
+                    // TODO send error to main thread
+                    let _ = audio_manager.add_play(&sound_don);
+                }
+                Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
+                    // TODO send error to main thread
+                    let _ = audio_manager.add_play(&sound_ka);
+                }
+                _ => {}
+            }
+        }
+    })
 }
 
 fn generate_schedules(score: &Score, assets: &Assets) -> Vec<SoundEffectSchedule> {
@@ -421,43 +429,4 @@ fn process_key_event(
             music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
         );
     }
-}
-
-extern "C" fn callback(user_data: *mut c_void, event: *mut sdl2_sys::SDL_Event) -> i32 {
-    let raw = unsafe { *event };
-    let raw_type = unsafe { raw.type_ };
-
-    // The following conversion is copied from `sdl2::event::Event:from_ll`.
-    // Why can't I reuse it?  Because it's currently a private function.
-
-    // if event type has not been defined, treat it as a UserEvent
-    let event_type: EventType = EventType::try_from(raw_type as u32).unwrap_or(EventType::User);
-    if let Some(keycode) = unsafe {
-        match event_type {
-            EventType::KeyDown => {
-                let event = raw.key;
-                Keycode::from_i32(event.keysym.sym as i32).filter(|_| event.repeat == 0)
-            }
-            _ => None,
-        }
-    } {
-        // `user_data` originates from `audio_manager` and `assets` variables
-        // in the `main` function stack, which should be valid until the hook is removed.
-        let (audio_manager, sound_don, sound_ka) = unsafe {
-            // &(*(user_data as *mut Assets)).chunks
-            *(user_data as *mut (&AudioManager, &SoundBuffer, &SoundBuffer))
-        };
-        match keycode {
-            Keycode::X | Keycode::Slash => {
-                // TODO send error to main thread
-                let _ = audio_manager.add_play(sound_don);
-            }
-            Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
-                // TODO send error to main thread
-                let _ = audio_manager.add_play(sound_ka);
-            }
-            _ => {}
-        }
-    }
-    0
 }

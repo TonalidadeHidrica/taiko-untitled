@@ -24,6 +24,10 @@ fn main() -> Result<(), TaikoError> {
         .allow_highdpi()
         .build()
         .map_err(|x| new_sdl_window_error("Failed to create main window", x))?;
+
+    let event_subsystem = sdl_context
+        .event()
+        .map_err(|s| new_sdl_error("Failed to initialize event subsystem of SDL", s))?;
     let mut event_pump = sdl_context
         .event_pump()
         .map_err(|s| new_sdl_error("Failed to initialize event pump for SDL", s))?;
@@ -68,6 +72,7 @@ fn main() -> Result<(), TaikoError> {
     game(
         &config,
         &mut canvas,
+        &event_subsystem,
         &mut event_pump,
         &mut timer_subsystem,
         &audio_manager,
