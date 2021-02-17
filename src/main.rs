@@ -9,7 +9,7 @@ fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
         .map_err(|e| new_config_error("Failed to load configuration", e))?;
 
-    let tja_file_name = std::env::args().skip(1).next().ok_or_else(|| TaikoError {
+    let tja_file_name = std::env::args().nth(1).ok_or_else(|| TaikoError {
         message: "Input file is not specified".to_owned(),
         cause: TaikoErrorCause::None,
     })?;

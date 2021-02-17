@@ -55,7 +55,7 @@ where
     let mut sorted_bar_lines = EnumMap::<_, Vec<_>>::new();
     for bar_line in bar_lines {
         let x = get_x(music_position, bar_line.time, bar_line.scroll_speed) as i32;
-        if 0 <= x && x <= 2000 {
+        if (0..=2000).contains(&x) {
             sorted_bar_lines[bar_line.kind].push(Rect::new(x + 96, 288, 3, 195));
         }
     }
@@ -71,7 +71,7 @@ where
     Ok(())
 }
 
-pub fn draw_notes<'a, I, N>(
+pub fn draw_notes<I, N>(
     canvas: &mut WindowCanvas,
     assets: &Assets,
     music_position: f64,

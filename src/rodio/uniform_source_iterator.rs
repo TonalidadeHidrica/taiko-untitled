@@ -21,11 +21,10 @@ where
 
     let source = DataConverter::<_, f32>::new(source);
     let source = ChannelCountConverter::new(source, input_channels, stream_config.channels);
-    let source = TrueSampleConverter::new(
+    TrueSampleConverter::new(
         source,
         input_sample_rate,
         stream_config.channels,
         stream_config.sample_rate.0,
-    );
-    source
+    )
 }

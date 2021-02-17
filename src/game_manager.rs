@@ -133,24 +133,24 @@ pub struct BranchAnimationState {
 impl Note {
     fn new(note: &just::Note, gauge_delta: &EnumMap<Judge, f64>) -> Self {
         Self {
-            scroll_speed: note.scroll_speed.clone(),
+            scroll_speed: note.scroll_speed,
             time: note.time,
             content: match &note.content {
                 just::NoteContent::Single(note) => NoteContent::Single(SingleNote {
-                    kind: note.kind.clone(),
+                    kind: note.kind,
                     info: SingleNoteInfo {
                         judge: None,
-                        gauge_delta: gauge_delta.clone(),
+                        gauge_delta: *gauge_delta,
                     },
                 }),
                 just::NoteContent::Renda(note) => NoteContent::Renda(RendaContent {
                     kind: match &note.kind {
                         just::RendaKind::Unlimited(note) => RendaKind::Unlimited(UnlimitedRenda {
-                            size: note.size.clone(),
+                            size: note.size,
                             info: (),
                         }),
                         just::RendaKind::Quota(note) => RendaKind::Quota(QuotaRenda {
-                            kind: note.kind.clone(),
+                            kind: note.kind,
                             quota: note.quota,
                             info: Default::default(),
                         }),
@@ -277,7 +277,7 @@ impl GameManager {
         self.auto
     }
 
-    pub fn branch_at(branches: &Vec<Branch>, branch_pointer: &mut usize, time: f64) -> BranchType {
+    pub fn branch_at(branches: &[Branch], branch_pointer: &mut usize, time: f64) -> BranchType {
         while branches.get(*branch_pointer).map_or(false, |branch| {
             branch.switch_time <= time && branch.info.determined_branch.is_some()
         }) {
@@ -289,8 +289,8 @@ impl GameManager {
     }
 
     fn check_note_wrapper<F, T>(
-        notes: &mut Vec<Note>,
-        branches: &Vec<Branch>,
+        notes: &mut[Note],
+        branches: &[Branch],
         judge_pointer: &mut usize,
         judge_branch_pointer: &mut usize,
         mut check_note: F,
@@ -416,7 +416,7 @@ impl GameManager {
                         game_state.update_with_judge(single_note, judge);
                         animation_state.flying_notes.push_back(FlyingNote {
                             time,
-                            kind: single_note.kind.clone(),
+                            kind: single_note.kind,
                         });
                         animation_state
                             .judge_strs
@@ -441,14 +441,14 @@ impl GameManager {
                 _ if note.time <= time && time < renda.end_time => {
                     if branch_matches {
                         match (&mut renda.kind, &color) {
-                            (RendaKind::Unlimited(renda_u), Some(color)) => {
+                            (RendaKind::Unlimited(renda_u), &Some(color)) => {
                                 game_state.renda_count += 1;
                                 renda.info.count += 1;
                                 animation_state.flying_notes.push_back(FlyingNote {
                                     time,
                                     kind: SingleNoteKind {
-                                        color: color.clone(),
-                                        size: renda_u.size.clone(),
+                                        color,
+                                        size: renda_u.size,
                                     },
                                 });
                             }
@@ -565,7 +565,7 @@ pub enum JudgeOnTimeline<T> {
     Break,
 }
 
-fn check_on_timeline<T, U, F>(vec: &mut Vec<T>, pointer: &mut usize, mut f: F) -> Option<U>
+fn check_on_timeline<T, U, F>(vec: &mut[T], pointer: &mut usize, mut f: F) -> Option<U>
 where
     F: FnMut(&mut T) -> JudgeOnTimeline<U>,
 {

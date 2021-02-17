@@ -79,6 +79,7 @@ where
             &score,
             &mut game_manager,
         )? {
+            #[allow(clippy::unit_arg)]
             break Ok(res);
         }
     };
@@ -93,6 +94,8 @@ where
     ret
 }
 
+// TODO too many parameters
+#[allow(clippy::too_many_arguments)]
 fn game_loop(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
@@ -157,7 +160,9 @@ fn game_loop(
             _ => {}
         }
     }
-    music_position.to_owned().map(|m| game_manager.hit(None, m));
+    if let Some(m) = music_position {
+        game_manager.hit(None, m);
+    }
 
     draw_game_to_canvas(canvas, assets, score, game_manager, music_position)?;
 

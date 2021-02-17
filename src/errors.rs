@@ -51,9 +51,9 @@ pub fn to_sdl_error<S>(message: S) -> impl FnOnce(SdlError) -> TaikoError
 where
     S: ToString,
 {
-    move |sdl_message| TaikoError {
+    move |sdl_error| TaikoError {
         message: message.to_string(),
-        cause: TaikoErrorCause::SdlError(sdl_message.into()),
+        cause: TaikoErrorCause::SdlError(sdl_error),
     }
 }
 
