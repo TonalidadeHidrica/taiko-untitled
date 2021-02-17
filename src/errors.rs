@@ -1,6 +1,7 @@
 use crate::tja::TjaError;
 use config::ConfigError;
 use cpal::{BuildStreamError, PlayStreamError, SupportedStreamConfigsError};
+use derive_more::From;
 use rodio::decoder::DecoderError;
 use sdl2::video::WindowBuildError;
 use sdl2::IntegerOrSdlError;
@@ -15,7 +16,7 @@ pub struct TaikoError {
 #[derive(Debug)]
 pub enum TaikoErrorCause {
     None,
-    SdlError(String),
+    SdlError(SdlError),
     SdlWindowError(WindowBuildError),
     SdlCanvasError(IntegerOrSdlError),
     ConfigError(ConfigError),
@@ -24,6 +25,9 @@ pub enum TaikoErrorCause {
     InvalidResourceError,
     TjaLoadError(TjaError),
 }
+
+#[derive(Debug, From)]
+pub struct SdlError(String);
 
 #[derive(Debug)]
 pub enum CpalOrRodioError {
@@ -39,7 +43,17 @@ where
 {
     TaikoError {
         message: message.to_string(),
-        cause: TaikoErrorCause::SdlError(sdl_message),
+        cause: TaikoErrorCause::SdlError(sdl_message.into()),
+    }
+}
+
+pub fn to_sdl_error<S>(message: S) -> impl FnOnce(SdlError) -> TaikoError
+where
+    S: ToString,
+{
+    move |sdl_message| TaikoError {
+        message: message.to_string(),
+        cause: TaikoErrorCause::SdlError(sdl_message.into()),
     }
 }
 

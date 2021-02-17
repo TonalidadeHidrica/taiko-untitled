@@ -6,6 +6,7 @@ pub mod audio;
 pub mod config;
 pub mod errors;
 pub mod game;
+pub mod game_graphics;
 pub mod game_manager;
 pub mod rodio;
 pub mod tja;
