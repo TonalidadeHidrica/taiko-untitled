@@ -69,10 +69,10 @@ where
     pub fn seek(&mut self, time: f64) -> Result<u64, String> {
         let time = time.max(0.0);
         self.input_front_sample_index = (time * self.input_sample_rate) as u64;
-        self.output_next_sample_index = (time * self.output_sample_rate) as u64;
+        self.output_next_sample_index = (time * self.output_sample_rate) as u64 + 1;
         self.input_samples_queue.clear();
         self.output_samples_queue.clear();
-        self.source.seek(self.input_front_sample_index as u64)?;
+        self.source.seek(self.input_front_sample_index)?;
         Ok(self.output_next_sample_index)
     }
 }
