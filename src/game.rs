@@ -18,7 +18,6 @@ use crate::utils::to_digits;
 use itertools::{iterate, Itertools};
 use num::clamp;
 use sdl2::event::Event;
-use sdl2::event::EventWatch;
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
@@ -235,7 +234,7 @@ fn setup_sound_effect<'e, 'au, 'at>(
     event_subsystem: &'e EventSubsystem,
     audio_manager: &'au AudioManager,
     assets: &'at Assets,
-) -> EventWatch<'au, impl FnMut(Event) -> () + 'au> {
+) -> impl Drop + 'au {
     let sound_don = assets.chunks.sound_don.clone();
     let sound_ka = assets.chunks.sound_ka.clone();
     event_subsystem.add_event_watch(move |event| {
