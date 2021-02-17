@@ -383,7 +383,7 @@ pub fn draw_game_notes(
                 kind: RendaKind::Quota(renda),
                 end_time,
                 ..
-            }) => renda.info.finished.then(|| {
+            }) => (!renda.info.finished).then(|| {
                 NoteContent::Renda(RendaContent {
                     kind: RendaKind::Quota(renda.clone_with_default()),
                     end_time: *end_time,
