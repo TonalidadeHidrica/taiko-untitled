@@ -1,47 +1,33 @@
-#![allow(unused_imports)]
-
-use crate::{
-    game_graphics::{
-        draw_bar_lines, draw_combo, draw_flying_notes, draw_judge_strs, draw_note, draw_notes,
-    },
-    game_manager::{GameManager, OfGameState},
-    utils::to_digits,
-};
-use enum_map::EnumMap;
-use itertools::iterate;
-use itertools::Itertools;
-use num::clamp;
-use sdl2::pixels::Color;
-use sdl2::rect::Rect;
-use sdl2::render::WindowCanvas;
-use sdl2::{
-    event::{Event, EventType},
-    keyboard::Mod,
-};
-use sdl2::{keyboard::Keycode, EventPump, TimerSubsystem};
-
-use std::iter;
-use std::iter::Peekable;
-use std::path::Path;
-use std::time::Duration;
-use std::{convert::TryFrom, path::PathBuf};
-use std::{convert::TryInto, ffi::c_void};
-
+use crate::assets::Assets;
 use crate::audio::{AudioManager, SoundBuffer, SoundEffectSchedule};
 use crate::config::TaikoConfig;
-use crate::errors::{
-    new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
-    SdlError, TaikoError, TaikoErrorCause,
+use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError, TaikoErrorCause};
+use crate::game_graphics::{
+    draw_background, draw_bar_lines, draw_branch_overlay, draw_combo, draw_flying_notes,
+    draw_gauge, draw_judge_strs, draw_notes,
 };
-use crate::game_graphics::{draw_background, draw_branch_overlay, draw_gauge};
+use crate::game_manager::{GameManager, OfGameState};
 use crate::structs::{
     just,
     just::Score,
     typed::{Branch, NoteContent, RendaContent, RendaKind, Score as TypedScore},
-    BarLine, BarLineKind, Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
+    BarLine, BranchType, NoteColor, NoteSize,
 };
-use crate::tja::{load_tja_from_file, Song};
-use crate::{assets::Assets, errors::to_sdl_error};
+use crate::tja::load_tja_from_file;
+use crate::utils::to_digits;
+use itertools::{iterate, Itertools};
+use num::clamp;
+use sdl2::event::{Event, EventType};
+use sdl2::keyboard::{Keycode, Mod};
+use sdl2::rect::Rect;
+use sdl2::render::WindowCanvas;
+use sdl2::{EventPump, TimerSubsystem};
+use std::convert::{TryFrom, TryInto};
+use std::ffi::c_void;
+use std::iter;
+use std::iter::Peekable;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 type ScoreOfGameState = TypedScore<OfGameState>;
 

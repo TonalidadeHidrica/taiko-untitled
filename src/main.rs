@@ -1,33 +1,9 @@
-#![allow(unused_imports)]
-
-use enum_map::EnumMap;
-use itertools::iterate;
-use itertools::Itertools;
-use num::clamp;
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
-use sdl2::rect::Rect;
-use sdl2::render::WindowCanvas;
-use sdl2::{
-    event::{Event, EventType},
-    keyboard::Mod,
-};
-use std::convert::TryFrom;
-use std::ffi::c_void;
-use std::iter;
-use std::time::Duration;
-use taiko_untitled::audio::{AudioManager, SoundBuffer, SoundEffectSchedule};
+use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::{
-    new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, new_tja_error,
-    TaikoError, TaikoErrorCause,
+    new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, TaikoError,
+    TaikoErrorCause,
 };
-use taiko_untitled::game_manager::{GameManager, Judge};
-use taiko_untitled::structs::{
-    typed::{NoteContent, RendaContent, RendaKind},
-    BarLineKind, Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
-};
-use taiko_untitled::tja::{load_tja_from_file, Song};
-use taiko_untitled::{assets::Assets, game::game};
+use taiko_untitled::game::game;
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()

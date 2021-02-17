@@ -1,21 +1,16 @@
-use crate::game_manager::FlyingNote;
-use std::borrow::Borrow;
-
+use crate::assets::Assets;
 use crate::errors::{new_sdl_error, SdlError, TaikoError};
-use crate::game_manager::{BranchAnimationState, Judge, JudgeStr};
+use crate::game_manager::{BranchAnimationState, FlyingNote, Judge, JudgeStr};
 use crate::structs::{
-    just::{Note, NoteContent, RendaContent},
-    BarLine, BarLineKind, BranchType, NoteColor, NoteSize, SingleNoteKind,
-};
-use crate::{
-    assets::Assets,
-    structs::{typed::RendaKind, Bpm},
+    just::{Note, NoteContent, RendaContent, RendaKind},
+    BarLine, BarLineKind, Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
 };
 use enum_map::EnumMap;
 use num::clamp;
 use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
 use sdl2::{pixels::Color, render::Texture};
+use std::borrow::Borrow;
 
 pub fn draw_background(canvas: &mut WindowCanvas, assets: &Assets) -> Result<(), SdlError> {
     canvas.set_draw_color(Color::RGBA(20, 20, 20, 0));
