@@ -289,7 +289,7 @@ impl GameManager {
     }
 
     fn check_note_wrapper<F, T>(
-        notes: &mut[Note],
+        notes: &mut [Note],
         branches: &[Branch],
         judge_pointer: &mut usize,
         judge_branch_pointer: &mut usize,
@@ -565,7 +565,7 @@ pub enum JudgeOnTimeline<T> {
     Break,
 }
 
-fn check_on_timeline<T, U, F>(vec: &mut[T], pointer: &mut usize, mut f: F) -> Option<U>
+fn check_on_timeline<T, U, F>(vec: &mut [T], pointer: &mut usize, mut f: F) -> Option<U>
 where
     F: FnMut(&mut T) -> JudgeOnTimeline<U>,
 {
