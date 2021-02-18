@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use itertools::iterate;
+use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -30,15 +32,27 @@ use crate::value_with_update_time::ValueWithUpdateTime;
 
 struct PausedScore<'a> {
     score: &'a Score,
-    scroll_points: BTreeSet<OrderedFloat<f64>>,
+    measure_scroll_points: BTreeSet<OrderedFloat<f64>>,
+    beat_scroll_points: BTreeSet<OrderedFloat<f64>>,
 }
 
 impl<'a> PausedScore<'a> {
     fn new(score: &'a Score) -> Self {
-        let scroll_points = score.bar_lines.iter().map(|b| b.time.into()).collect();
+        let measure_scroll_points = score.bar_lines.iter().map(|b| b.time.into()).collect();
+        let beat_scroll_points = score
+            .bar_lines
+            .iter()
+            .tuple_windows()
+            .flat_map(|(a, b)| {
+                iterate(a.time, move |x| x + a.scroll_speed.beat_duration())
+                    .take_while(move |&x| x < b.time - 1e-3)
+            })
+            .map(Into::into)
+            .collect();
         PausedScore {
-            scroll_points,
             score,
+            measure_scroll_points,
+            beat_scroll_points,
         }
     }
 }
@@ -105,16 +119,30 @@ where
                         music_position: Some(music_position.get()),
                     }))
                 }
+                Keycode::PageDown => music_position.set_with(|x| {
+                    score
+                        .measure_scroll_points
+                        .range(..OrderedFloat::from(x - 1e-3))
+                        .next_back()
+                        .map_or(x, |x| **x)
+                }),
+                Keycode::PageUp => music_position.set_with(|x| {
+                    score
+                        .measure_scroll_points
+                        .range(OrderedFloat::from(x + 1e-3)..)
+                        .next()
+                        .map_or(x, |x| **x)
+                }),
                 Keycode::Left => music_position.set_with(|x| {
                     score
-                        .scroll_points
+                        .beat_scroll_points
                         .range(..OrderedFloat::from(x - 1e-3))
                         .next_back()
                         .map_or(x, |x| **x)
                 }),
                 Keycode::Right => music_position.set_with(|x| {
                     score
-                        .scroll_points
+                        .beat_scroll_points
                         .range(OrderedFloat::from(x + 1e-3)..)
                         .next()
                         .map_or(x, |x| **x)
