@@ -60,9 +60,9 @@ pub struct EasingF64Impl<F> {
     easing_function: F,
 }
 
-impl<F> EasingF64Impl<F> 
+impl<F> EasingF64Impl<F>
 where
-    F: Fn(f64) -> f64
+    F: Fn(f64) -> f64,
 {
     pub fn new(value: f64, easing_time: Duration, easing_function: F) -> Self {
         Self {

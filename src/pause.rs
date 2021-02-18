@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use ordered_float::OrderedFloat;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::render::WindowCanvas;
@@ -23,7 +25,21 @@ use crate::structs::just::Score;
 use crate::tja::Song;
 use crate::value_with_update_time::EasingF64;
 use crate::value_with_update_time::EasingF64Impl;
-use crate::value_with_update_time::ValueWithUpdateTime;
+
+struct PausedScore<'a> {
+    score: &'a Score,
+    scroll_points: BTreeSet<OrderedFloat<f64>>,
+}
+
+impl<'a> PausedScore<'a> {
+    fn new(score: &'a Score) -> Self {
+        let scroll_points = score.bar_lines.iter().map(|b| b.time.into()).collect();
+        PausedScore {
+            scroll_points,
+            score,
+        }
+    }
+}
 
 pub fn pause(
     config: &TaikoConfig,
@@ -41,11 +57,13 @@ pub fn pause(
         message: "There is no score in the tja file".to_owned(),
         cause: TaikoErrorCause::None,
     })?;
+    let score = PausedScore::new(score);
 
     audio_manager.pause()?;
 
-    let mut music_position =
-        EasingF64Impl::new(time, Duration::from_millis(250), |x| 1.0 - (1.0 - x).powi(3));
+    let mut music_position = EasingF64Impl::new(time, Duration::from_millis(250), |x| {
+        1.0 - (1.0 - x).powi(3)
+    });
 
     loop {
         if let Some(res) = pause_loop(
@@ -54,7 +72,7 @@ pub fn pause(
             event_pump,
             assets,
             &mut music_position,
-            score,
+            &score,
         )? {
             break Ok(res);
         }
@@ -67,7 +85,7 @@ fn pause_loop<E>(
     event_pump: &mut EventPump,
     assets: &mut Assets,
     music_position: &mut E,
-    score: &Score,
+    score: &PausedScore,
 ) -> Result<Option<GameMode>, TaikoError>
 where
     E: EasingF64,
@@ -84,8 +102,20 @@ where
                         music_position: Some(music_position.get()),
                     }))
                 }
-                Keycode::Left => music_position.set_with(|x| x - 1.0),
-                Keycode::Right => music_position.set_with(|x| x + 1.0),
+                Keycode::Left => music_position.set_with(|x| {
+                    score
+                        .scroll_points
+                        .range(..OrderedFloat::from(x - 1e-3))
+                        .next_back()
+                        .map_or(x, |x| **x)
+                }),
+                Keycode::Right => music_position.set_with(|x| {
+                    score
+                        .scroll_points
+                        .range(OrderedFloat::from(x + 1e-3)..)
+                        .next()
+                        .map_or(x, |x| **x)
+                }),
                 _ => {}
             },
             _ => {}
@@ -98,8 +128,13 @@ where
     let rect = game_rect();
     canvas.set_clip_rect(rect);
     {
-        draw_bar_lines(canvas, display_position, score.bar_lines.iter())?;
-        draw_notes(canvas, assets, display_position, score.notes.iter().rev())?;
+        draw_bar_lines(canvas, display_position, score.score.bar_lines.iter())?;
+        draw_notes(
+            canvas,
+            assets,
+            display_position,
+            score.score.notes.iter().rev(),
+        )?;
     }
     canvas.set_clip_rect(None);
 
