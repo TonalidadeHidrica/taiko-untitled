@@ -4,6 +4,8 @@ use taiko_untitled::errors::{
     TaikoErrorCause,
 };
 use taiko_untitled::game::game;
+use taiko_untitled::mode::GameMode;
+use taiko_untitled::pause::pause;
 
 fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
@@ -69,16 +71,33 @@ fn main() -> Result<(), TaikoError> {
         audio_manager.set_music_volume(volume)?;
     }
 
-    game(
-        &config,
-        &mut canvas,
-        &event_subsystem,
-        &mut event_pump,
-        &mut timer_subsystem,
-        &audio_manager,
-        &mut assets,
-        tja_file_name,
-    )?;
+    let mut mode = GameMode::Play;
+    loop {
+        mode = match mode {
+            GameMode::Play => game(
+                &config,
+                &mut canvas,
+                &event_subsystem,
+                &mut event_pump,
+                &mut timer_subsystem,
+                &audio_manager,
+                &mut assets,
+                &tja_file_name,
+            )?,
+            GameMode::Pause { song, path } => pause(
+                &config,
+                &mut canvas,
+                &event_subsystem,
+                &mut event_pump,
+                &mut timer_subsystem,
+                &audio_manager,
+                &mut assets,
+                path,
+                song,
+            )?,
+            GameMode::Exit => break,
+        }
+    }
 
     Ok(())
 }

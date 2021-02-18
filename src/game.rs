@@ -7,6 +7,7 @@ use crate::game_graphics::{
     draw_gauge, draw_judge_strs, draw_notes,
 };
 use crate::game_manager::{GameManager, OfGameState};
+use crate::mode::GameMode;
 use crate::structs::{
     just,
     just::Score,
@@ -25,10 +26,15 @@ use sdl2::{EventPump, EventSubsystem, TimerSubsystem};
 use std::convert::TryInto;
 use std::iter;
 use std::iter::Peekable;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 type ScoreOfGameState = TypedScore<OfGameState>;
+
+enum GameBreak {
+    Pause,
+    Exit,
+}
 
 pub fn game<P>(
     config: &TaikoConfig,
@@ -39,18 +45,18 @@ pub fn game<P>(
     audio_manager: &AudioManager,
     assets: &mut Assets,
     tja_file_name: P,
-) -> Result<(), TaikoError>
+) -> Result<GameMode, TaikoError>
 where
     P: AsRef<Path>,
 {
-    let song = load_tja_from_file(tja_file_name)
+    let song = load_tja_from_file(&tja_file_name)
         .map_err(|e| new_tja_error("Failed to load tja file", e))?;
     let score = song.score.as_ref().ok_or_else(|| TaikoError {
         message: "There is no score in the tja file".to_owned(),
         cause: TaikoErrorCause::None,
     })?;
 
-    setup_audio_manager(audio_manager, assets, score, song.wave)?;
+    setup_audio_manager(audio_manager, assets, score, song.wave.as_ref())?;
     let _sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
 
     let mut game_manager = GameManager::new(&score);
@@ -66,8 +72,13 @@ where
             &score,
             &mut game_manager,
         )? {
-            #[allow(clippy::unit_arg)]
-            break Ok(res);
+            break Ok(match res {
+                GameBreak::Exit => GameMode::Exit,
+                GameBreak::Pause => GameMode::Pause {
+                    path: tja_file_name.as_ref().to_owned(),
+                    song,
+                },
+            });
         }
     }
 }
@@ -83,13 +94,13 @@ fn game_loop(
     assets: &mut Assets,
     score: &Score,
     game_manager: &mut GameManager,
-) -> Result<Option<()>, TaikoError> {
+) -> Result<Option<GameBreak>, TaikoError> {
     let music_position = audio_manager.music_position()?;
     let sdl_timestamp = timer_subsystem.ticks();
 
     for event in event_pump.poll_iter() {
         match event {
-            Event::Quit { .. } => return Ok(Some(())),
+            Event::Quit { .. } => return Ok(Some(GameBreak::Exit)),
             Event::KeyDown {
                 repeat: false,
                 keycode: Some(keycode),
@@ -114,9 +125,7 @@ fn game_loop(
                 }
                 Keycode::Space => {
                     if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) {
-                        audio_manager.pause()?;
-                    } else {
-                        audio_manager.play()?;
+                        return Ok(Some(GameBreak::Pause));
                     }
                 }
                 Keycode::F1 => {
@@ -214,16 +223,18 @@ fn draw_game_to_canvas(
     Ok(())
 }
 
-fn setup_audio_manager(
+fn setup_audio_manager<P>(
     audio_manager: &AudioManager,
     assets: &Assets,
     score: &Score,
-    wave: Option<PathBuf>,
+    wave: Option<P>,
 ) -> Result<(), TaikoError>
 where
+    P: AsRef<Path>,
 {
     if let Some(song_wave_path) = wave {
-        audio_manager.load_music(song_wave_path)?;
+        // TODO Do we really need to copy path?
+        audio_manager.load_music(song_wave_path.as_ref().to_owned())?;
     }
     audio_manager.add_play_schedules(generate_schedules(&score, assets))?;
     audio_manager.play()?;
