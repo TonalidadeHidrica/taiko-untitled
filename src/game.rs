@@ -2,6 +2,7 @@ use crate::assets::Assets;
 use crate::audio::{AudioManager, SoundEffectSchedule};
 use crate::config::TaikoConfig;
 use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError, TaikoErrorCause};
+use crate::game_graphics::game_rect;
 use crate::game_graphics::{
     draw_background, draw_bar_lines, draw_branch_overlay, draw_combo, draw_flying_notes,
     draw_gauge, draw_judge_strs, draw_notes,
@@ -20,7 +21,6 @@ use itertools::{iterate, Itertools};
 use num::clamp;
 use sdl2::event::Event;
 use sdl2::keyboard::{Keycode, Mod};
-use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
 use sdl2::{EventPump, EventSubsystem, TimerSubsystem};
 use std::convert::TryInto;
@@ -32,7 +32,7 @@ use std::time::Duration;
 type ScoreOfGameState = TypedScore<OfGameState>;
 
 enum GameBreak {
-    Pause,
+    Pause(f64),
     Exit,
 }
 
@@ -45,6 +45,7 @@ pub fn game<P>(
     audio_manager: &AudioManager,
     assets: &mut Assets,
     tja_file_name: P,
+    music_position: Option<f64>,
 ) -> Result<GameMode, TaikoError>
 where
     P: AsRef<Path>,
@@ -56,7 +57,14 @@ where
         cause: TaikoErrorCause::None,
     })?;
 
-    setup_audio_manager(audio_manager, assets, score, song.wave.as_ref())?;
+    match music_position {
+        None => setup_audio_manager(audio_manager, assets, score, song.wave.as_ref())?,
+        Some(time) => {
+            // TODO Gotta wait until seek completes
+            audio_manager.seek(time)?;
+            audio_manager.play()?;
+        }
+    };
     let _sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
 
     let mut game_manager = GameManager::new(&score);
@@ -74,9 +82,10 @@ where
         )? {
             break Ok(match res {
                 GameBreak::Exit => GameMode::Exit,
-                GameBreak::Pause => GameMode::Pause {
+                GameBreak::Pause(time) => GameMode::Pause {
                     path: tja_file_name.as_ref().to_owned(),
                     song,
+                    music_position: time,
                 },
             });
         }
@@ -125,7 +134,7 @@ fn game_loop(
                 }
                 Keycode::Space => {
                     if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) {
-                        return Ok(Some(GameBreak::Pause));
+                        return Ok(Some(GameBreak::Pause(music_position.unwrap_or(0.0))));
                     }
                 }
                 Keycode::F1 => {
@@ -175,7 +184,7 @@ fn draw_game_to_canvas(
     draw_gauge(canvas, assets, gauge, 39, 50).map_err(|e| new_sdl_error("Failed to drawr", e))?;
 
     if let Some(music_position) = music_position {
-        let score_rect = Rect::new(498, 288, 1422, 195);
+        let score_rect = game_rect();
         canvas.set_clip_rect(score_rect);
         {
             draw_branch_overlay(

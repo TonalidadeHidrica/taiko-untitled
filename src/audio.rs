@@ -24,6 +24,9 @@ pub struct AudioManager {
 
 enum PlaybackPosition {
     NotStarted,
+    Seeking {
+        music_position: f64,
+    },
     Paused {
         music_position: f64,
     },
@@ -112,6 +115,17 @@ impl AudioManager {
     }
 
     pub fn seek(&self, time: f64) -> Result<(), TaikoError> {
+        {
+            // TODO there should be a better way
+            let mut playback_position = self.playback_position.lock().map_err(|_| TaikoError {
+                message: "Failed to obtain music position; the audio stream has been panicked"
+                    .to_string(),
+                cause: TaikoErrorCause::None,
+            })?;
+            *playback_position = PlaybackPosition::Seeking {
+                music_position: time,
+            };
+        }
         self.sender_to_audio
             .send(MessageToAudio::Seek(time))
             .map_err(|_| TaikoError {
@@ -194,7 +208,7 @@ impl AudioManager {
                 };
                 Some(diff + music_position)
             }
-            Paused { music_position } => Some(music_position),
+            Paused { music_position } | Seeking { music_position } => Some(music_position),
             NotStarted => None,
         };
         Ok(res)

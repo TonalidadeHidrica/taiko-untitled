@@ -12,6 +12,10 @@ use sdl2::render::WindowCanvas;
 use sdl2::{pixels::Color, render::Texture};
 use std::borrow::Borrow;
 
+pub fn game_rect() -> Rect {
+    Rect::new(498, 288, 1422, 195)
+}
+
 pub fn draw_background(canvas: &mut WindowCanvas, assets: &Assets) -> Result<(), SdlError> {
     canvas.set_draw_color(Color::RGBA(20, 20, 20, 0));
     canvas.clear();
