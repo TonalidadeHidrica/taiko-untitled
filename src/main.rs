@@ -71,10 +71,14 @@ fn main() -> Result<(), TaikoError> {
         audio_manager.set_music_volume(volume)?;
     }
 
-    let mut mode = GameMode::Play { music_position: None };
+    let mut mode = GameMode::Play {
+        music_position: None,
+    };
     loop {
         mode = match mode {
-            GameMode::Play { music_position: time } => game(
+            GameMode::Play {
+                music_position: time,
+            } => game(
                 &config,
                 &mut canvas,
                 &event_subsystem,
@@ -85,12 +89,14 @@ fn main() -> Result<(), TaikoError> {
                 &tja_file_name,
                 time,
             )?,
-            GameMode::Pause { song, path, music_position: time } => pause(
+            GameMode::Pause {
+                song,
+                path,
+                music_position: time,
+            } => pause(
                 &config,
                 &mut canvas,
-                &event_subsystem,
                 &mut event_pump,
-                &mut timer_subsystem,
                 &audio_manager,
                 &mut assets,
                 path,

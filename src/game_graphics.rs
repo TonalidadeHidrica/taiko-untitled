@@ -1,6 +1,6 @@
 use crate::assets::Assets;
 use crate::errors::{new_sdl_error, SdlError, TaikoError};
-use crate::game_manager::{BranchAnimationState, FlyingNote, Judge, JudgeStr};
+use crate::game_manager::{FlyingNote, Judge, JudgeStr};
 use crate::structs::{
     just::{Note, NoteContent, RendaContent, RendaKind},
     BarLine, BarLineKind, Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
@@ -27,6 +27,33 @@ pub fn draw_background(canvas: &mut WindowCanvas, assets: &Assets) -> Result<(),
     Ok(())
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct BranchAnimationState {
+    switch_time: f64,
+    branch_before: BranchType,
+    branch_after: BranchType,
+}
+
+impl BranchAnimationState {
+    pub fn new(branch: BranchType) -> Self {
+        Self {
+            switch_time: 0.0,
+            branch_before: branch,
+            branch_after: branch,
+        }
+    }
+
+    pub fn set(&mut self, branch: BranchType, time: f64) {
+        self.branch_before = self.branch_after;
+        self.branch_after = branch;
+        self.switch_time = time;
+    }
+
+    pub fn get(&self) -> BranchType {
+        self.branch_after
+    }
+}
+
 /// Branch overleay effect
 pub fn draw_branch_overlay(
     canvas: &mut WindowCanvas,
@@ -46,6 +73,14 @@ pub fn draw_branch_overlay(
         .map_err(|e| new_sdl_error("Failed to draw branch overlay", e))?;
     canvas.set_blend_mode(sdl2::render::BlendMode::None);
     Ok(())
+}
+
+fn branch_overlay_color(branch_type: BranchType) -> Color {
+    match branch_type {
+        BranchType::Normal => Color::RGB(0, 0, 0),
+        BranchType::Expert => Color::RGB(8, 38, 55),
+        BranchType::Master => Color::RGB(58, 0, 53),
+    }
 }
 
 pub fn draw_bar_lines<'a, I>(
@@ -324,14 +359,6 @@ pub fn draw_gauge(
         Rect::new(1799, 215, 71, 63),
     )?;
     Ok(())
-}
-
-fn branch_overlay_color(branch_type: BranchType) -> Color {
-    match branch_type {
-        BranchType::Normal => Color::RGB(0, 0, 0),
-        BranchType::Expert => Color::RGB(8, 38, 55),
-        BranchType::Master => Color::RGB(58, 0, 53),
-    }
 }
 
 fn interpolate_color(color_zero: Color, color_one: Color, t: f64) -> Color {

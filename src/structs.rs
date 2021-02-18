@@ -267,6 +267,39 @@ impl Default for BranchType {
     }
 }
 
+// TODO use (or create?) some derive macro
+impl BranchType {
+    pub fn next(self) -> Option<Self> {
+        use BranchType::*;
+        match self {
+            Normal => Some(Expert),
+            Expert => Some(Master),
+            Master => None,
+        }
+    }
+
+    pub fn prev(self) -> Option<Self> {
+        use BranchType::*;
+        match self {
+            Normal => None,
+            Expert => Some(Normal),
+            Master => Some(Expert),
+        }
+    }
+
+    pub fn saturating_next(self) -> Self {
+        self.next().unwrap_or(Self::Master)
+    }
+
+    pub fn saturating_prev(self) -> Self {
+        self.prev().unwrap_or(Self::Normal)
+    }
+
+    pub fn matches(self, other: Option<Self>) -> bool {
+        other.map_or(true, |x| x == self)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct BranchEvent {
     pub time: f64,

@@ -1,3 +1,4 @@
+use crate::game_graphics::BranchAnimationState;
 use crate::structs::*;
 use boolinator::Boolinator;
 use enum_map::{enum_map, Enum, EnumMap};
@@ -115,19 +116,13 @@ impl GameState {
     }
 }
 
+// TODO move entire animation state
 #[derive(Default)]
 pub struct AnimationState {
     flying_notes: VecDeque<FlyingNote>,
     judge_strs: VecDeque<JudgeStr>,
     pub last_combo_update: f64,
     pub branch_state: BranchAnimationState,
-}
-
-#[derive(Default)]
-pub struct BranchAnimationState {
-    pub switch_time: f64,
-    pub branch_before: BranchType,
-    pub branch_after: BranchType,
 }
 
 impl Note {
@@ -378,11 +373,8 @@ impl GameManager {
                 branch.info.determined_branch = new_branch;
                 self.next_branch_pointer += 1;
 
-                let bs = &mut self.animation_state.branch_state;
                 if let Some(new_branch) = new_branch {
-                    bs.branch_before = bs.branch_after;
-                    bs.branch_after = new_branch;
-                    bs.switch_time = time;
+                    self.animation_state.branch_state.set(new_branch, time);
                 }
             }
         }

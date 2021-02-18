@@ -6,12 +6,31 @@ pub struct ValueWithUpdateTime<T> {
     time: Instant,
 }
 
+impl<T> ValueWithUpdateTime<T> {
+    pub fn update<'a, F>(&'a mut self, f: F)
+    where
+        F: FnOnce(&'a mut T) -> (),
+    {
+        f(&mut self.value);
+        self.time = Instant::now();
+    }
+
+    pub fn last_update(&self) -> Instant {
+        self.time
+    }
+
+    pub fn duration_since_update(&self) -> Duration {
+        Instant::now() - self.time
+    }
+}
+
 impl<T: Copy> ValueWithUpdateTime<T> {
     pub fn new(value: T) -> Self {
-        Self {
-            value,
-            time: Instant::now(),
-        }
+        Self::new_with_time(value, Instant::now())
+    }
+
+    pub fn new_with_time(value: T, time: Instant) -> Self {
+        Self { value, time }
     }
 
     pub fn get(&self) -> T {
@@ -22,19 +41,15 @@ impl<T: Copy> ValueWithUpdateTime<T> {
         *self = Self::new(value);
     }
 
+    pub fn set_with_time(&mut self, value: T, time: Instant) {
+        *self = Self::new_with_time(value, time);
+    }
+
     pub fn set_with<F>(&mut self, f: F)
     where
         F: FnOnce(T) -> T,
     {
         self.set(f(self.value))
-    }
-
-    pub fn last_update(&self) -> Instant {
-        self.time
-    }
-
-    pub fn duration_since_update(&self) -> Duration {
-        Instant::now() - self.time
     }
 }
 
