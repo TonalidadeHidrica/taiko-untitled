@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::Path;
 use std::time::Duration;
 
 use itertools::iterate;
@@ -22,7 +22,6 @@ use crate::game_graphics::draw_branch_overlay;
 use crate::game_graphics::draw_notes;
 use crate::game_graphics::game_rect;
 use crate::game_graphics::BranchAnimationState;
-use crate::mode::GameMode;
 use crate::structs::just::Score;
 use crate::structs::BranchType;
 use crate::tja::Song;
@@ -57,16 +56,24 @@ impl<'a> PausedScore<'a> {
     }
 }
 
-pub fn pause(
+pub enum PauseBreak {
+    Exit,
+    Play(f64),
+}
+
+pub fn pause<P>(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
     audio_manager: &AudioManager,
     assets: &mut Assets,
-    _tja_file_name: PathBuf,
-    song: Song,
+    _tja_file_name: P,
+    song: &Song,
     time: f64,
-) -> Result<GameMode, TaikoError> {
+) -> Result<PauseBreak, TaikoError>
+where
+    P: AsRef<Path>,
+{
     let score = song.score.as_ref().ok_or_else(|| TaikoError {
         message: "There is no score in the tja file".to_owned(),
         cause: TaikoErrorCause::None,
@@ -103,21 +110,19 @@ fn pause_loop<E>(
     score: &PausedScore,
     music_position: &mut E,
     branch: &mut ValueWithUpdateTime<BranchAnimationState>,
-) -> Result<Option<GameMode>, TaikoError>
+) -> Result<Option<PauseBreak>, TaikoError>
 where
     E: EasingF64,
 {
     for event in event_pump.poll_iter() {
         match event {
-            Event::Quit { .. } => return Ok(Some(GameMode::Exit)),
+            Event::Quit { .. } => return Ok(Some(PauseBreak::Exit)),
             Event::KeyDown {
                 keycode: Some(keycode),
                 ..
             } => match keycode {
                 Keycode::Space => {
-                    return Ok(Some(GameMode::Play {
-                        music_position: Some(music_position.get()),
-                    }))
+                    return Ok(Some(PauseBreak::Play(music_position.get())));
                 }
                 Keycode::PageDown => music_position.set_with(|x| {
                     score

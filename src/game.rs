@@ -9,6 +9,8 @@ use crate::game_graphics::{
 };
 use crate::game_manager::{GameManager, OfGameState};
 use crate::mode::GameMode;
+use crate::pause::pause;
+use crate::pause::PauseBreak;
 use crate::structs::{
     just,
     just::Score,
@@ -33,6 +35,7 @@ type ScoreOfGameState = TypedScore<OfGameState>;
 
 enum GameBreak {
     Pause(f64),
+    Escape,
     Exit,
 }
 
@@ -45,7 +48,6 @@ pub fn game<P>(
     audio_manager: &AudioManager,
     assets: &mut Assets,
     tja_file_name: P,
-    music_position: Option<f64>,
 ) -> Result<GameMode, TaikoError>
 where
     P: AsRef<Path>,
@@ -57,17 +59,57 @@ where
         cause: TaikoErrorCause::None,
     })?;
 
-    match music_position {
-        None => setup_audio_manager(audio_manager, assets, score, song.wave.as_ref())?,
-        Some(time) => {
-            // TODO Gotta wait until seek completes
-            audio_manager.seek(time)?;
-            audio_manager.play()?;
-        }
-    };
-    let _sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
+    setup_audio_manager(audio_manager, assets, score, song.wave.as_ref())?;
+    let mut time = 0.0;
 
+    loop {
+        match pause(
+            config,
+            canvas,
+            event_pump,
+            audio_manager,
+            assets,
+            &tja_file_name,
+            &song,
+            time,
+        )? {
+            PauseBreak::Exit => break Ok(GameMode::Exit),
+            PauseBreak::Play(request_time) => {
+                time = request_time;
+                // TODO Gotta wait until seek completes
+                audio_manager.seek(time)?;
+                audio_manager.play()?;
+            }
+        }
+        match play(
+            config,
+            canvas,
+            event_subsystem,
+            event_pump,
+            timer_subsystem,
+            audio_manager,
+            assets,
+            &score,
+        )? {
+            GameBreak::Exit => break Ok(GameMode::Exit),
+            GameBreak::Escape => {}
+            GameBreak::Pause(request_time) => time = request_time,
+        }
+    }
+}
+
+fn play(
+    config: &TaikoConfig,
+    canvas: &mut WindowCanvas,
+    event_subsystem: &EventSubsystem,
+    event_pump: &mut EventPump,
+    timer_subsystem: &mut TimerSubsystem,
+    audio_manager: &AudioManager,
+    assets: &mut Assets,
+    score: &Score,
+) -> Result<GameBreak, TaikoError> {
     let mut game_manager = GameManager::new(&score);
+    let _sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
 
     loop {
         if let Some(res) = game_loop(
@@ -80,14 +122,7 @@ where
             &score,
             &mut game_manager,
         )? {
-            break Ok(match res {
-                GameBreak::Exit => GameMode::Exit,
-                GameBreak::Pause(time) => GameMode::Pause {
-                    path: tja_file_name.as_ref().to_owned(),
-                    song,
-                    music_position: time,
-                },
-            });
+            break Ok(res);
         }
     }
 }
@@ -117,6 +152,7 @@ fn game_loop(
                 keymod,
                 ..
             } => match keycode {
+                Keycode::Q => return Ok(Some(GameBreak::Escape)),
                 Keycode::Z
                 | Keycode::X
                 | Keycode::Slash
