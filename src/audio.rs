@@ -444,7 +444,7 @@ impl<T> AudioThreadState<T> {
                         break;
                     }
                     let next = self.sound_effect_schedules.pop_front().unwrap();
-                    if !self.scheduled_play_enabled {
+                    if next.timestamp < music_position_start || !self.scheduled_play_enabled {
                         continue;
                     }
                     let mut source = next.source;
