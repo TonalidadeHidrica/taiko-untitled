@@ -40,6 +40,13 @@ enum GameBreak {
     Exit,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct GameUserState {
+    pub time: f64,
+    pub auto: bool,
+    pub speed: f64,
+}
+
 pub fn game<P>(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
@@ -63,8 +70,11 @@ where
     if let Some(song_wave_path) = &song.wave {
         audio_manager.load_music(song_wave_path)?;
     }
-    let mut time = 0.0;
-    let mut auto = false;
+    let mut game_user_state = GameUserState {
+        time: 0.0,
+        auto: false,
+        speed: 1.0,
+    };
 
     loop {
         match pause(
@@ -75,14 +85,10 @@ where
             assets,
             &tja_file_name,
             &song,
-            time,
-            auto,
+            game_user_state,
         )? {
             PauseBreak::Exit => break Ok(GameMode::Exit),
-            PauseBreak::Play(request_time, request_auto) => {
-                time = request_time;
-                auto = request_auto;
-            }
+            PauseBreak::Play(new_state) => game_user_state = new_state,
         }
         match play(
             config,
@@ -93,12 +99,11 @@ where
             audio_manager,
             assets,
             &score,
-            time,
-            &mut auto,
+            &mut game_user_state,
         )? {
             GameBreak::Exit => break Ok(GameMode::Exit),
             GameBreak::Escape => {}
-            GameBreak::Pause(request_time) => time = request_time,
+            GameBreak::Pause(request_time) => game_user_state.time = request_time,
         }
     }
 }
@@ -112,15 +117,15 @@ fn play(
     audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
     score: &Score,
-    start_time: f64,
-    auto: &mut bool,
+    game_user_state: &mut GameUserState,
 ) -> Result<GameBreak, TaikoError> {
     let mut game_manager = GameManager::new(&score);
     let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
-    sound_effect_event_watch.set_activated(!*auto);
+    sound_effect_event_watch.set_activated(!game_user_state.auto);
 
     audio_manager.sound_effect_receiver.try_iter().count();  // Consume all
-    audio_manager.seek(start_time)?;
+    audio_manager.set_play_speed(game_user_state.speed)?;
+    audio_manager.seek(game_user_state.time)?;
     let mut auto_sent_pointer = 0;
     audio_manager.clear_play_schedules()?;
     audio_manager.add_play_schedules(generate_audio_schedules(
@@ -128,7 +133,7 @@ fn play(
         &game_manager.score,
         &mut auto_sent_pointer,
     ))?;
-    audio_manager.set_play_scheduled(*auto)?;
+    audio_manager.set_play_scheduled(game_user_state.auto)?;
     audio_manager.play()?;
 
     // TODO Gotta wait until seek completes and it starts to play
@@ -145,7 +150,7 @@ fn play(
             &mut game_manager,
             &mut sound_effect_event_watch,
             &mut auto_sent_pointer,
-            auto,
+            &mut game_user_state.auto,
         )? {
             break Ok(res);
         }

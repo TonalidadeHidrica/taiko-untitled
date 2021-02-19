@@ -17,6 +17,7 @@ use crate::errors::to_sdl_error;
 use crate::errors::TaikoError;
 use crate::errors::TaikoErrorCause;
 use crate::game::AutoEvent;
+use crate::game::GameUserState;
 use crate::game_graphics::draw_background;
 use crate::game_graphics::draw_bar_lines;
 use crate::game_graphics::draw_branch_overlay;
@@ -58,8 +59,8 @@ impl<'a> PausedScore<'a> {
 }
 
 pub enum PauseBreak {
+    Play(GameUserState),
     Exit,
-    Play(f64, bool),
 }
 
 pub fn pause<P>(
@@ -70,8 +71,7 @@ pub fn pause<P>(
     assets: &mut Assets,
     _tja_file_name: P,
     song: &Song,
-    time: f64,
-    mut auto: bool,
+    mut game_user_state: GameUserState,
 ) -> Result<PauseBreak, TaikoError>
 where
     P: AsRef<Path>,
@@ -84,9 +84,10 @@ where
 
     audio_manager.pause()?;
 
-    let mut music_position = EasingF64Impl::new(time, Duration::from_millis(250), |x| {
-        1.0 - (1.0 - x).powi(3)
-    });
+    let mut music_position =
+        EasingF64Impl::new(game_user_state.time, Duration::from_millis(250), |x| {
+            1.0 - (1.0 - x).powi(3)
+        });
     let mut branch = ValueWithUpdateTime::new(BranchAnimationState::new(BranchType::Normal));
 
     loop {
@@ -98,7 +99,7 @@ where
             &score,
             &mut music_position,
             &mut branch,
-            &mut auto,
+            &mut game_user_state,
         )? {
             break Ok(res);
         }
@@ -113,7 +114,7 @@ fn pause_loop<E>(
     score: &PausedScore,
     music_position: &mut E,
     branch: &mut ValueWithUpdateTime<BranchAnimationState>,
-    auto: &mut bool,
+    game_user_state: &mut GameUserState,
 ) -> Result<Option<PauseBreak>, TaikoError>
 where
     E: EasingF64,
@@ -126,9 +127,10 @@ where
                 ..
             } => match keycode {
                 Keycode::Space => {
-                    return Ok(Some(PauseBreak::Play(music_position.get(), *auto)));
+                    game_user_state.time = music_position.get();
+                    return Ok(Some(PauseBreak::Play(*game_user_state)));
                 }
-                Keycode::F1 => *auto = !*auto,
+                Keycode::F1 => game_user_state.auto = !game_user_state.auto,
                 Keycode::PageDown => music_position.set_with(|x| {
                     score
                         .measure_scroll_points
@@ -159,6 +161,8 @@ where
                 }),
                 Keycode::Up => branch.update(|b| b.set(b.get().saturating_next(), 0.0)),
                 Keycode::Down => branch.update(|b| b.set(b.get().saturating_prev(), 0.0)),
+                Keycode::Num1 => game_user_state.speed = (game_user_state.speed / 2.0).max(0.25),
+                Keycode::Num2 => game_user_state.speed = (game_user_state.speed * 2.0).min(1.0),
                 _ => {}
             },
             _ => {}

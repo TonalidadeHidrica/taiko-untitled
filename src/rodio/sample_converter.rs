@@ -42,8 +42,9 @@ where
 
     #[inline]
     fn discard_before(&mut self, sample_index: u64) {
-        let remove_len =
-            (sample_index - self.input_front_sample_index) as usize * self.channels as usize;
+        // TODO is saturating_sub correct?
+        let remove_len = sample_index.saturating_sub(self.input_front_sample_index) as usize
+            * self.channels as usize;
         self.input_samples_queue
             .drain(..self.input_samples_queue.len().min(remove_len));
         self.input_front_sample_index = sample_index;
@@ -74,6 +75,14 @@ where
         self.output_samples_queue.clear();
         self.source.seek(self.input_front_sample_index)?;
         Ok(self.output_next_sample_index)
+    }
+
+    pub fn output_sample_rate(&self) -> f64 {
+        self.output_sample_rate
+    }
+
+    pub fn set_output_sample_rate(&mut self, rate: f64) {
+        self.output_sample_rate = rate;
     }
 }
 
