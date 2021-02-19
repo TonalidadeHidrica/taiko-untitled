@@ -11,6 +11,7 @@ use crate::game_manager::{GameManager, OfGameState};
 use crate::mode::GameMode;
 use crate::pause::pause;
 use crate::pause::PauseBreak;
+use crate::structs::SingleNoteKind;
 use crate::structs::{
     just,
     just::Score,
@@ -26,7 +27,6 @@ use sdl2::keyboard::{Keycode, Mod};
 use sdl2::render::WindowCanvas;
 use sdl2::{EventPump, EventSubsystem, TimerSubsystem};
 use std::convert::TryInto;
-use std::iter;
 use std::iter::Peekable;
 use std::path::Path;
 use std::time::Duration;
@@ -45,7 +45,7 @@ pub fn game<P>(
     event_subsystem: &EventSubsystem,
     event_pump: &mut EventPump,
     timer_subsystem: &mut TimerSubsystem,
-    audio_manager: &AudioManager,
+    audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
     tja_file_name: P,
 ) -> Result<GameMode, TaikoError>
@@ -59,7 +59,9 @@ where
         cause: TaikoErrorCause::None,
     })?;
 
-    setup_audio_manager(audio_manager, assets, score, song.wave.as_ref())?;
+    if let Some(song_wave_path) = &song.wave {
+        audio_manager.load_music(song_wave_path)?;
+    }
     let mut time = 0.0;
 
     loop {
@@ -74,12 +76,7 @@ where
             time,
         )? {
             PauseBreak::Exit => break Ok(GameMode::Exit),
-            PauseBreak::Play(request_time) => {
-                time = request_time;
-                // TODO Gotta wait until seek completes
-                audio_manager.seek(time)?;
-                audio_manager.play()?;
-            }
+            PauseBreak::Play(request_time) => time = request_time,
         }
         match play(
             config,
@@ -90,6 +87,7 @@ where
             audio_manager,
             assets,
             &score,
+            time,
         )? {
             GameBreak::Exit => break Ok(GameMode::Exit),
             GameBreak::Escape => {}
@@ -104,12 +102,25 @@ fn play(
     event_subsystem: &EventSubsystem,
     event_pump: &mut EventPump,
     timer_subsystem: &mut TimerSubsystem,
-    audio_manager: &AudioManager,
+    audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
     score: &Score,
+    start_time: f64,
 ) -> Result<GameBreak, TaikoError> {
     let mut game_manager = GameManager::new(&score);
     let _sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
+
+    audio_manager.seek(start_time)?;
+    let mut auto_sent_pointer = 0;
+    audio_manager.clear_play_schedules()?;
+    audio_manager.add_play_schedules(generate_audio_schedules(
+        assets,
+        &game_manager.score,
+        &mut auto_sent_pointer,
+    ))?;
+    audio_manager.play()?;
+
+    // TODO Gotta wait until seek completes and it starts to play
 
     loop {
         if let Some(res) = game_loop(
@@ -121,6 +132,7 @@ fn play(
             assets,
             &score,
             &mut game_manager,
+            &mut auto_sent_pointer,
         )? {
             break Ok(res);
         }
@@ -134,10 +146,11 @@ fn game_loop(
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
     timer_subsystem: &mut TimerSubsystem,
-    audio_manager: &AudioManager,
+    audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
     score: &Score,
     game_manager: &mut GameManager,
+    auto_sent_pointer: &mut usize,
 ) -> Result<Option<GameBreak>, TaikoError> {
     let music_position = audio_manager.music_position()?;
     let sdl_timestamp = timer_subsystem.ticks();
@@ -157,16 +170,16 @@ fn game_loop(
                 | Keycode::X
                 | Keycode::Slash
                 | Keycode::Underscore
-                | Keycode::Backslash
-                    if audio_manager.playing()? =>
-                {
-                    process_key_event(
-                        keycode,
-                        game_manager,
-                        music_position,
-                        timestamp,
-                        sdl_timestamp,
-                    );
+                | Keycode::Backslash => {
+                    if !game_manager.auto() {
+                        process_key_event(
+                            keycode,
+                            game_manager,
+                            music_position,
+                            timestamp,
+                            sdl_timestamp,
+                        );
+                    }
                 }
                 Keycode::Space => {
                     if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) {
@@ -177,16 +190,6 @@ fn game_loop(
                     let auto = game_manager.switch_auto();
                     audio_manager.set_play_scheduled(auto)?;
                 }
-                Keycode::PageUp => {
-                    if let Some(music_position) = music_position {
-                        audio_manager.seek(music_position + 1.0)?;
-                    }
-                }
-                Keycode::PageDown => {
-                    if let Some(music_position) = music_position {
-                        audio_manager.seek(music_position - 1.0)?;
-                    }
-                }
                 _ => {}
             },
             _ => {}
@@ -195,6 +198,12 @@ fn game_loop(
     if let Some(m) = music_position {
         game_manager.hit(None, m);
     }
+
+    audio_manager.add_play_schedules(generate_audio_schedules(
+        assets,
+        &game_manager.score,
+        auto_sent_pointer,
+    ))?;
 
     draw_game_to_canvas(canvas, assets, score, game_manager, music_position)?;
 
@@ -268,27 +277,9 @@ fn draw_game_to_canvas(
     Ok(())
 }
 
-fn setup_audio_manager<P>(
-    audio_manager: &AudioManager,
-    assets: &Assets,
-    score: &Score,
-    wave: Option<P>,
-) -> Result<(), TaikoError>
-where
-    P: AsRef<Path>,
-{
-    if let Some(song_wave_path) = wave {
-        // TODO Do we really need to copy path?
-        audio_manager.load_music(song_wave_path.as_ref().to_owned())?;
-    }
-    audio_manager.add_play_schedules(generate_schedules(&score, assets))?;
-    audio_manager.play()?;
-    Ok(())
-}
-
 fn setup_sound_effect<'e, 'au, 'at>(
     event_subsystem: &'e EventSubsystem,
-    audio_manager: &'au AudioManager,
+    audio_manager: &'au AudioManager<AutoEvent>,
     assets: &'at Assets,
 ) -> impl Drop + 'au {
     let sound_don = assets.chunks.sound_don.clone();
@@ -313,42 +304,6 @@ fn setup_sound_effect<'e, 'au, 'at>(
             }
         }
     })
-}
-
-fn generate_schedules(score: &Score, assets: &Assets) -> Vec<SoundEffectSchedule> {
-    let mut schedules = Vec::new();
-    for note in &score.notes {
-        match &note.content {
-            NoteContent::Single(single_note) => {
-                let chunk = match single_note.kind.color {
-                    NoteColor::Don => &assets.chunks.sound_don,
-                    NoteColor::Ka => &assets.chunks.sound_ka,
-                };
-                let count = match single_note.kind.size {
-                    NoteSize::Small => 1,
-                    NoteSize::Large => 2,
-                };
-                schedules.extend(
-                    iter::repeat_with(|| SoundEffectSchedule {
-                        timestamp: note.time,
-                        source: chunk.new_source(),
-                    })
-                    .take(count),
-                );
-            }
-            NoteContent::Renda(RendaContent { end_time, .. }) => {
-                schedules.extend(
-                    iterate(note.time, |&x| x + 1.0 / 20.0)
-                        .take_while(|t| t < end_time)
-                        .map(|t| SoundEffectSchedule {
-                            timestamp: t,
-                            source: assets.chunks.sound_don.new_source(),
-                        }),
-                );
-            }
-        }
-    }
-    schedules
 }
 
 struct BarLineIterator<'a, Branches, BarLines>
@@ -484,4 +439,82 @@ fn process_key_event(
             music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
         );
     }
+}
+
+fn generate_audio_schedules(
+    assets: &Assets,
+    score: &ScoreOfGameState,
+    auto_sent_pointer: &mut usize,
+) -> Vec<SoundEffectSchedule<AutoEvent>> {
+    let mut schedules = Vec::new();
+    let mut current_branch = BranchType::Normal;
+    let mut branches = score.branches.iter().peekable();
+    while *auto_sent_pointer < score.notes.len() {
+        let note = &score.notes[*auto_sent_pointer];
+        if let Some(branch) = branches
+            .peeking_take_while(|b| b.switch_time <= note.time)
+            .last()
+        {
+            match branch.info.determined_branch {
+                Some(branch) => current_branch = branch,
+                None => break,
+            }
+        }
+        *auto_sent_pointer += 1;
+        if note.branch.map_or(false, |b| b != current_branch) {
+            continue;
+        }
+        match &note.content {
+            NoteContent::Single(single_note) => {
+                let chunk = match single_note.kind.color {
+                    NoteColor::Don => &assets.chunks.sound_don,
+                    NoteColor::Ka => &assets.chunks.sound_ka,
+                };
+                let volume = match single_note.kind.size {
+                    NoteSize::Small => 1.0,
+                    NoteSize::Large => 2.0,
+                };
+                schedules.push(SoundEffectSchedule {
+                    timestamp: note.time,
+                    source: chunk.new_source(),
+                    volume,
+                    response: AutoEvent {
+                        time: note.time,
+                        kind: single_note.kind,
+                    },
+                });
+            }
+            NoteContent::Renda(RendaContent { end_time, .. }) => {
+                schedules.extend(
+                    iterate(note.time, |&x| x + 1.0 / 20.0)
+                        .take_while(|t| t < end_time)
+                        .map(|t| SoundEffectSchedule {
+                            timestamp: t,
+                            source: assets.chunks.sound_don.new_source(),
+                            volume: 1.0,
+                            response: AutoEvent {
+                                time: t,
+                                kind: SingleNoteKind {
+                                    color: NoteColor::Don,
+                                    size: NoteSize::Small,
+                                },
+                            },
+                        }),
+                );
+            }
+        }
+    }
+    if schedules.len() > 0 {
+        println!(
+            "Sent schedules: {:?}",
+            schedules.iter().map(|x| &x.response).collect_vec()
+        );
+    }
+    schedules
+}
+
+#[derive(Debug)]
+pub struct AutoEvent {
+    pub time: f64,
+    pub kind: SingleNoteKind,
 }

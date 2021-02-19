@@ -262,6 +262,10 @@ impl GameManager {
         }
     }
 
+    pub fn auto(&self) -> bool {
+        self.auto
+    }
+
     fn set_auto(&mut self, auto: bool) {
         self.auto = auto;
         dbg!(auto);
@@ -270,52 +274,6 @@ impl GameManager {
     pub fn switch_auto(&mut self) -> bool {
         self.set_auto(!self.auto);
         self.auto
-    }
-
-    pub fn branch_at(branches: &[Branch], branch_pointer: &mut usize, time: f64) -> BranchType {
-        while branches.get(*branch_pointer).map_or(false, |branch| {
-            branch.switch_time <= time && branch.info.determined_branch.is_some()
-        }) {
-            *branch_pointer += 1;
-        }
-        (*branch_pointer > 0)
-            .and_option_from(|| branches[*branch_pointer - 1].info.determined_branch)
-            .unwrap_or(BranchType::Normal)
-    }
-
-    fn check_note_wrapper<F, T>(
-        notes: &mut [Note],
-        branches: &[Branch],
-        judge_pointer: &mut usize,
-        judge_branch_pointer: &mut usize,
-        mut check_note: F,
-    ) -> Option<T>
-    where
-        F: FnMut(&mut Note, bool) -> JudgeOnTimeline<T>,
-    {
-        let mut branch_pointer = *judge_branch_pointer;
-        check_on_timeline(notes, judge_pointer, |note: &mut Note| {
-            let branch = Self::branch_at(branches, &mut branch_pointer, note.time);
-            let branch_matches = note.branch.map_or(true, |b| b == branch);
-
-            let ret = check_note(note, branch_matches);
-
-            if let JudgeOnTimeline::Past = ret {
-                *judge_branch_pointer = branch_pointer;
-            }
-            ret
-        })
-    }
-
-    fn branch_by_candidate<T>(v: T, e: T, m: T) -> BranchType
-    where
-        T: PartialOrd + std::fmt::Debug,
-    {
-        match v {
-            v if v >= m => BranchType::Master,
-            v if v >= e => BranchType::Expert,
-            _ => BranchType::Normal,
-        }
     }
 
     pub fn hit(&mut self, color: Option<NoteColor>, time: f64) {
@@ -330,7 +288,7 @@ impl GameManager {
                 }
                 BranchEventKind::LevelHold(branch) => {
                     if branch
-                        == Self::branch_at(
+                        == branch_at(
                             &self.score.branches,
                             &mut self.branch_event_branch_pointer,
                             event.time,
@@ -361,13 +319,13 @@ impl GameManager {
                         } else {
                             score as f64 / total as f64 * 100.0
                         };
-                        Self::branch_by_candidate(precision, e, m).into()
+                        branch_by_candidate(precision, e, m).into()
                     }
                     BranchCondition::Renda(e, m) => {
-                        Self::branch_by_candidate(diff.renda_count, e, m).into()
+                        branch_by_candidate(diff.renda_count, e, m).into()
                     }
                     BranchCondition::Score(e, m) => {
-                        Self::branch_by_candidate(diff.score, e, m).into()
+                        branch_by_candidate(diff.score, e, m).into()
                     }
                 };
                 branch.info.determined_branch = new_branch;
@@ -475,7 +433,7 @@ impl GameManager {
                 _ => unreachable!(),
             },
         };
-        let first_hit_check = Self::check_note_wrapper(
+        let first_hit_check = check_note_wrapper(
             notes,
             branches,
             judge_pointer,
@@ -510,15 +468,15 @@ impl GameManager {
                 JudgeOnTimeline::Past
             }
         };
-        let _overall_hit_check = first_hit_check
-            || Self::check_note_wrapper(
+        if !first_hit_check {
+            check_note_wrapper(
                 notes,
                 branches,
                 judge_bad_pointer,
                 judge_branch_bad_pointer,
                 check_note_bad,
-            )
-            .is_some();
+            );
+        }
     }
 
     pub fn flying_notes<F>(&mut self, filter_out: F) -> impl DoubleEndedIterator<Item = &FlyingNote>
@@ -535,6 +493,53 @@ impl GameManager {
         filter_out_and_iter(&mut self.animation_state.judge_strs, filter_out)
     }
 }
+
+fn branch_at(branches: &[Branch], branch_pointer: &mut usize, time: f64) -> BranchType {
+    while branches.get(*branch_pointer).map_or(false, |branch| {
+        branch.switch_time <= time && branch.info.determined_branch.is_some()
+    }) {
+        *branch_pointer += 1;
+    }
+    (*branch_pointer > 0)
+        .and_option_from(|| branches[*branch_pointer - 1].info.determined_branch)
+        .unwrap_or(BranchType::Normal)
+}
+
+pub fn check_note_wrapper<F, T>(
+    notes: &mut [Note],
+    branches: &[Branch],
+    judge_pointer: &mut usize,
+    judge_branch_pointer: &mut usize,
+    mut check_note: F,
+) -> Option<T>
+where
+    F: FnMut(&mut Note, bool) -> JudgeOnTimeline<T>,
+{
+    let mut branch_pointer = *judge_branch_pointer;
+    check_on_timeline(notes, judge_pointer, |note: &mut Note| {
+        let branch = branch_at(branches, &mut branch_pointer, note.time);
+        let branch_matches = note.branch.map_or(true, |b| b == branch);
+
+        let ret = check_note(note, branch_matches);
+
+        if let JudgeOnTimeline::Past = ret {
+            *judge_branch_pointer = branch_pointer;
+        }
+        ret
+    })
+}
+
+fn branch_by_candidate<T>(v: T, e: T, m: T) -> BranchType
+where
+    T: PartialOrd + std::fmt::Debug,
+{
+    match v {
+        v if v >= m => BranchType::Master,
+        v if v >= e => BranchType::Expert,
+        _ => BranchType::Normal,
+    }
+}
+
 
 fn filter_out_and_iter<T, F>(
     vec: &mut VecDeque<T>,

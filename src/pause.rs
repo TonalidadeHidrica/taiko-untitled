@@ -16,6 +16,7 @@ use crate::config::TaikoConfig;
 use crate::errors::to_sdl_error;
 use crate::errors::TaikoError;
 use crate::errors::TaikoErrorCause;
+use crate::game::AutoEvent;
 use crate::game_graphics::draw_background;
 use crate::game_graphics::draw_bar_lines;
 use crate::game_graphics::draw_branch_overlay;
@@ -65,7 +66,7 @@ pub fn pause<P>(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
-    audio_manager: &AudioManager,
+    audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
     _tja_file_name: P,
     song: &Song,

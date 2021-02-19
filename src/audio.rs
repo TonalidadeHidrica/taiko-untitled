@@ -15,9 +15,9 @@ use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub struct AudioManager {
+pub struct AudioManager<T> {
     pub stream_config: StreamConfig,
-    sender_to_audio: Sender<MessageToAudio>,
+    sender_to_audio: Sender<MessageToAudio<T>>,
     drop_sender: Sender<()>,
     playback_position: Arc<Mutex<PlaybackPosition>>,
 }
@@ -36,19 +36,21 @@ enum PlaybackPosition {
     },
 }
 
-enum MessageToAudio {
+enum MessageToAudio<T> {
     Play,
     Pause,
     Seek(f64),
     LoadMusic(PathBuf),
     SetMusicVolume(f32),
     AddPlay(SoundBufferSource),
-    AddSchedules(Vec<SoundEffectSchedule>),
+
+    AddSchedules(Vec<SoundEffectSchedule<T>>),
+    CleanSchedules,
     SwitchScheduled(bool),
 }
 
-impl AudioManager {
-    pub fn new() -> Result<AudioManager, TaikoError> {
+impl<T: Send + 'static> AudioManager<T> {
+    pub fn new() -> Result<AudioManager<T>, TaikoError> {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
         let (stream_config_sender, stream_config_receiver) = mpsc::channel();
         let (drop_sender, drop_receiver) = mpsc::channel();
@@ -167,12 +169,21 @@ impl AudioManager {
 
     pub fn add_play_schedules(
         &self,
-        schedules: Vec<SoundEffectSchedule>,
+        schedules: Vec<SoundEffectSchedule<T>>,
     ) -> Result<(), TaikoError> {
         self.sender_to_audio
             .send(MessageToAudio::AddSchedules(schedules))
             .map_err(|_| TaikoError {
                 message: "Failed to push schedules; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn clear_play_schedules(&self) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::CleanSchedules)
+            .map_err(|_| TaikoError {
+                message: "Failed to clear schedules; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -215,8 +226,8 @@ impl AudioManager {
     }
 }
 
-fn stream_thread(
-    receiver_to_audio: Receiver<MessageToAudio>,
+fn stream_thread<T: Send + 'static>(
+    receiver_to_audio: Receiver<MessageToAudio<T>>,
     playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
 ) -> Result<(StreamConfig, Stream), TaikoError> {
     let host = cpal::default_host();
@@ -271,7 +282,7 @@ fn stream_thread(
     Ok((stream_config, stream))
 }
 
-impl Drop for AudioManager {
+impl <T> Drop for AudioManager<T> {
     fn drop(&mut self) {
         if self.drop_sender.send(()).is_err() {
             eprintln!("Failed to send drop signal to audio stream thread");
@@ -281,16 +292,16 @@ impl Drop for AudioManager {
 
 type MusicSource = TrueUniformSourceIterator<Decoder<BufReader<File>>>;
 
-struct AudioThreadState {
+struct AudioThreadState<T> {
     stream_config: StreamConfig,
 
     music: Option<MusicSource>,
     sound_effects: Vec<SoundBufferSource>,
 
-    sound_effect_schedules: VecDeque<SoundEffectSchedule>,
+    sound_effect_schedules: VecDeque<SoundEffectSchedule<T>>,
     scheduled_play_enabled: bool,
 
-    receiver_to_audio: mpsc::Receiver<MessageToAudio>,
+    receiver_to_audio: mpsc::Receiver<MessageToAudio<T>>,
     playing: bool,
     played_sample_count: usize,
     skip_sample_count: usize,
@@ -298,15 +309,17 @@ struct AudioThreadState {
     music_volume: f32,
 }
 
-pub struct SoundEffectSchedule {
+pub struct SoundEffectSchedule<T> {
     pub timestamp: f64,
     pub source: SoundBufferSource,
+    pub volume: f64,
+    pub response: T,
 }
 
-impl AudioThreadState {
+impl <T> AudioThreadState<T> {
     pub fn new(
         stream_config: StreamConfig,
-        receiver_to_audio: mpsc::Receiver<MessageToAudio>,
+        receiver_to_audio: mpsc::Receiver<MessageToAudio<T>>,
         playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     ) -> Self {
         AudioThreadState {
@@ -372,6 +385,9 @@ impl AudioThreadState {
                     MessageToAudio::SetMusicVolume(volume) => self.music_volume = volume,
                     MessageToAudio::AddPlay(source) => {
                         self.sound_effects.push(source);
+                    }
+                    MessageToAudio::CleanSchedules => {
+                        self.sound_effect_schedules.clear();
                     }
                     MessageToAudio::AddSchedules(mut schedules) => {
                         schedules.sort_unstable_by(|x, y| {
