@@ -476,7 +476,8 @@ impl<T> AudioThreadState<T> {
                     }
                     _ => None,
                 }
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+                .clamp(-4.0, 4.0); // Prevent too large sound
 
                 self.sound_effects.retain_mut(|source| match source.next() {
                     Some(value) => {
