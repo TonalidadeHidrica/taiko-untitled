@@ -282,7 +282,7 @@ fn stream_thread<T: Send + 'static>(
     Ok((stream_config, stream))
 }
 
-impl <T> Drop for AudioManager<T> {
+impl<T> Drop for AudioManager<T> {
     fn drop(&mut self) {
         if self.drop_sender.send(()).is_err() {
             eprintln!("Failed to send drop signal to audio stream thread");
@@ -316,7 +316,7 @@ pub struct SoundEffectSchedule<T> {
     pub response: T,
 }
 
-impl <T> AudioThreadState<T> {
+impl<T> AudioThreadState<T> {
     pub fn new(
         stream_config: StreamConfig,
         receiver_to_audio: mpsc::Receiver<MessageToAudio<T>>,

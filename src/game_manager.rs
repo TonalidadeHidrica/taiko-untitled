@@ -324,9 +324,7 @@ impl GameManager {
                     BranchCondition::Renda(e, m) => {
                         branch_by_candidate(diff.renda_count, e, m).into()
                     }
-                    BranchCondition::Score(e, m) => {
-                        branch_by_candidate(diff.score, e, m).into()
-                    }
+                    BranchCondition::Score(e, m) => branch_by_candidate(diff.score, e, m).into(),
                 };
                 branch.info.determined_branch = new_branch;
                 self.next_branch_pointer += 1;
@@ -539,7 +537,6 @@ where
         _ => BranchType::Normal,
     }
 }
-
 
 fn filter_out_and_iter<T, F>(
     vec: &mut VecDeque<T>,

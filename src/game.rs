@@ -1,4 +1,5 @@
 use crate::assets::Assets;
+use crate::audio::SoundBuffer;
 use crate::audio::{AudioManager, SoundEffectSchedule};
 use crate::config::TaikoConfig;
 use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError, TaikoErrorCause};
@@ -22,7 +23,7 @@ use crate::tja::load_tja_from_file;
 use crate::utils::to_digits;
 use itertools::{iterate, Itertools};
 use num::clamp;
-use sdl2::event::Event;
+use sdl2::event::{Event, EventWatch, EventWatchCallback};
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::render::WindowCanvas;
 use sdl2::{EventPump, EventSubsystem, TimerSubsystem};
@@ -108,7 +109,7 @@ fn play(
     start_time: f64,
 ) -> Result<GameBreak, TaikoError> {
     let mut game_manager = GameManager::new(&score);
-    let _sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
+    let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
 
     audio_manager.seek(start_time)?;
     let mut auto_sent_pointer = 0;
@@ -132,6 +133,7 @@ fn play(
             assets,
             &score,
             &mut game_manager,
+            &mut sound_effect_event_watch,
             &mut auto_sent_pointer,
         )? {
             break Ok(res);
@@ -150,6 +152,7 @@ fn game_loop(
     assets: &mut Assets,
     score: &Score,
     game_manager: &mut GameManager,
+    sound_effect_event_watch: &mut EventWatch<SoundEffectCallback>,
     auto_sent_pointer: &mut usize,
 ) -> Result<Option<GameBreak>, TaikoError> {
     let music_position = audio_manager.music_position()?;
@@ -189,6 +192,7 @@ fn game_loop(
                 Keycode::F1 => {
                     let auto = game_manager.switch_auto();
                     audio_manager.set_play_scheduled(auto)?;
+                    sound_effect_event_watch.set_activated(!auto);
                 }
                 _ => {}
             },
@@ -277,14 +281,13 @@ fn draw_game_to_canvas(
     Ok(())
 }
 
-fn setup_sound_effect<'e, 'au, 'at>(
-    event_subsystem: &'e EventSubsystem,
-    audio_manager: &'au AudioManager<AutoEvent>,
-    assets: &'at Assets,
-) -> impl Drop + 'au {
-    let sound_don = assets.chunks.sound_don.clone();
-    let sound_ka = assets.chunks.sound_ka.clone();
-    event_subsystem.add_event_watch(move |event| {
+struct SoundEffectCallback<'a> {
+    sound_don: SoundBuffer,
+    sound_ka: SoundBuffer,
+    audio_manager: &'a AudioManager<AutoEvent>,
+}
+impl<'a> EventWatchCallback for SoundEffectCallback<'a> {
+    fn callback(&mut self, event: Event) {
         if let Event::KeyDown {
             keycode: Some(keycode),
             repeat: false,
@@ -294,15 +297,29 @@ fn setup_sound_effect<'e, 'au, 'at>(
             match keycode {
                 Keycode::X | Keycode::Slash => {
                     // TODO send error to main thread
-                    let _ = audio_manager.add_play(&sound_don);
+                    let _ = self.audio_manager.add_play(&self.sound_don);
                 }
                 Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
                     // TODO send error to main thread
-                    let _ = audio_manager.add_play(&sound_ka);
+                    let _ = self.audio_manager.add_play(&self.sound_ka);
                 }
                 _ => {}
             }
         }
+    }
+}
+
+fn setup_sound_effect<'e, 'au, 'at>(
+    event_subsystem: &'e EventSubsystem,
+    audio_manager: &'au AudioManager<AutoEvent>,
+    assets: &'at Assets,
+) -> EventWatch<'au, SoundEffectCallback<'au>> {
+    let sound_don = assets.chunks.sound_don.clone();
+    let sound_ka = assets.chunks.sound_ka.clone();
+    event_subsystem.add_event_watch(SoundEffectCallback {
+        sound_don,
+        sound_ka,
+        audio_manager,
     })
 }
 
@@ -503,12 +520,6 @@ fn generate_audio_schedules(
                 );
             }
         }
-    }
-    if schedules.len() > 0 {
-        println!(
-            "Sent schedules: {:?}",
-            schedules.iter().map(|x| &x.response).collect_vec()
-        );
     }
     schedules
 }

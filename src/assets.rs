@@ -46,7 +46,7 @@ pub struct Chunks {
 impl<'a> Assets<'a> {
     pub fn new<'b>(
         texture_creator: &'a TextureCreator<WindowContext>,
-        audio_manager: &'b AudioManager<AutoEvent>,  // TODO should be stream_config instead
+        audio_manager: &'b AudioManager<AutoEvent>, // TODO should be stream_config instead
     ) -> Result<Assets<'a>, TaikoError> {
         let assets_dir = Path::new("assets");
 
