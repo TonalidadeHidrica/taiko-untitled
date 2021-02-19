@@ -199,6 +199,9 @@ fn game_loop(
             _ => {}
         }
     }
+    for response in audio_manager.sound_effect_receiver.try_iter() {
+        game_manager.hit(Some(response.kind.color), response.time);
+    }
     if let Some(m) = music_position {
         game_manager.hit(None, m);
     }

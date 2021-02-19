@@ -19,6 +19,7 @@ pub struct AudioManager<T> {
     pub stream_config: StreamConfig,
     sender_to_audio: Sender<MessageToAudio<T>>,
     drop_sender: Sender<()>,
+    pub sound_effect_receiver: Receiver<T>,
     playback_position: Arc<Mutex<PlaybackPosition>>,
 }
 
@@ -54,11 +55,16 @@ impl<T: Send + 'static> AudioManager<T> {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
         let (stream_config_sender, stream_config_receiver) = mpsc::channel();
         let (drop_sender, drop_receiver) = mpsc::channel();
+        let (sound_effect_sender, sound_effect_receiver) = mpsc::channel();
         let playback_position = Arc::new(Mutex::new(PlaybackPosition::NotStarted));
 
         let playback_position_ptr = Arc::downgrade(&playback_position);
-        thread::spawn(
-            move || match stream_thread(receiver_to_audio, playback_position_ptr) {
+        thread::spawn(move || {
+            match stream_thread(
+                receiver_to_audio,
+                sound_effect_sender,
+                playback_position_ptr,
+            ) {
                 Err(err) => {
                     if stream_config_sender.send(Err(err)).is_err() {
                         eprintln!("Failed to send error info to main thread.");
@@ -71,8 +77,8 @@ impl<T: Send + 'static> AudioManager<T> {
                     // preserve stream until "drop" signal is sent from main thread
                     drop_receiver.recv().ok();
                 }
-            },
-        );
+            }
+        });
         let stream_config = stream_config_receiver.recv().map_err(|_| TaikoError {
             message: "Audio device initialization thread has been stopped".to_string(),
             cause: TaikoErrorCause::None,
@@ -82,6 +88,7 @@ impl<T: Send + 'static> AudioManager<T> {
             stream_config,
             sender_to_audio,
             drop_sender,
+            sound_effect_receiver,
             playback_position,
         })
     }
@@ -228,6 +235,7 @@ impl<T: Send + 'static> AudioManager<T> {
 
 fn stream_thread<T: Send + 'static>(
     receiver_to_audio: Receiver<MessageToAudio<T>>,
+    sound_effect_sender: Sender<T>,
     playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
 ) -> Result<(StreamConfig, Stream), TaikoError> {
     let host = cpal::default_host();
@@ -257,6 +265,7 @@ fn stream_thread<T: Send + 'static>(
     let state = AudioThreadState::new(
         stream_config.clone(),
         receiver_to_audio,
+        sound_effect_sender,
         playback_position_ptr,
     );
     let error_callback = |err| eprintln!("an error occurred on stream: {:?}", err);
@@ -301,7 +310,8 @@ struct AudioThreadState<T> {
     sound_effect_schedules: VecDeque<SoundEffectSchedule<T>>,
     scheduled_play_enabled: bool,
 
-    receiver_to_audio: mpsc::Receiver<MessageToAudio<T>>,
+    receiver_to_audio: Receiver<MessageToAudio<T>>,
+    sound_effect_sender: Sender<T>,
     playing: bool,
     played_sample_count: usize,
     skip_sample_count: usize,
@@ -320,6 +330,7 @@ impl<T> AudioThreadState<T> {
     pub fn new(
         stream_config: StreamConfig,
         receiver_to_audio: mpsc::Receiver<MessageToAudio<T>>,
+        sound_effect_sender: Sender<T>,
         playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     ) -> Self {
         AudioThreadState {
@@ -331,6 +342,7 @@ impl<T> AudioThreadState<T> {
             scheduled_play_enabled: false,
 
             receiver_to_audio,
+            sound_effect_sender,
             playing: false,
             played_sample_count: 0,
             skip_sample_count: 0,
@@ -441,6 +453,10 @@ impl<T> AudioThreadState<T> {
                         * self.stream_config.sample_rate.0 as f64)
                         as usize;
                     self.sound_effects.push(source);
+                    self.sound_effect_sender
+                        .send(next.response)
+                        .map_err(|e| format!("The main thread has been panicked: {}", e))
+                        .unwrap(); // Intentionally panic when error
                 }
 
                 // TODO: SPAGHETTI CODE!
