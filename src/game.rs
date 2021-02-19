@@ -117,7 +117,9 @@ fn play(
 ) -> Result<GameBreak, TaikoError> {
     let mut game_manager = GameManager::new(&score);
     let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
+    sound_effect_event_watch.set_activated(!*auto);
 
+    audio_manager.sound_effect_receiver.try_iter().count();  // Consume all
     audio_manager.seek(start_time)?;
     let mut auto_sent_pointer = 0;
     audio_manager.clear_play_schedules()?;
