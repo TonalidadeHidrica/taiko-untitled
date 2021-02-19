@@ -64,6 +64,7 @@ where
         audio_manager.load_music(song_wave_path)?;
     }
     let mut time = 0.0;
+    let mut auto = false;
 
     loop {
         match pause(
@@ -75,9 +76,13 @@ where
             &tja_file_name,
             &song,
             time,
+            auto,
         )? {
             PauseBreak::Exit => break Ok(GameMode::Exit),
-            PauseBreak::Play(request_time) => time = request_time,
+            PauseBreak::Play(request_time, request_auto) => {
+                time = request_time;
+                auto = request_auto;
+            }
         }
         match play(
             config,
@@ -89,6 +94,7 @@ where
             assets,
             &score,
             time,
+            &mut auto,
         )? {
             GameBreak::Exit => break Ok(GameMode::Exit),
             GameBreak::Escape => {}
@@ -107,6 +113,7 @@ fn play(
     assets: &mut Assets,
     score: &Score,
     start_time: f64,
+    auto: &mut bool,
 ) -> Result<GameBreak, TaikoError> {
     let mut game_manager = GameManager::new(&score);
     let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
@@ -119,6 +126,7 @@ fn play(
         &game_manager.score,
         &mut auto_sent_pointer,
     ))?;
+    audio_manager.set_play_scheduled(*auto)?;
     audio_manager.play()?;
 
     // TODO Gotta wait until seek completes and it starts to play
@@ -135,6 +143,7 @@ fn play(
             &mut game_manager,
             &mut sound_effect_event_watch,
             &mut auto_sent_pointer,
+            auto,
         )? {
             break Ok(res);
         }
@@ -154,6 +163,7 @@ fn game_loop(
     game_manager: &mut GameManager,
     sound_effect_event_watch: &mut EventWatch<SoundEffectCallback>,
     auto_sent_pointer: &mut usize,
+    auto: &mut bool,
 ) -> Result<Option<GameBreak>, TaikoError> {
     let music_position = audio_manager.music_position()?;
     let sdl_timestamp = timer_subsystem.ticks();
@@ -174,7 +184,7 @@ fn game_loop(
                 | Keycode::Slash
                 | Keycode::Underscore
                 | Keycode::Backslash => {
-                    if !game_manager.auto() {
+                    if !*auto {
                         process_key_event(
                             keycode,
                             game_manager,
@@ -190,9 +200,9 @@ fn game_loop(
                     }
                 }
                 Keycode::F1 => {
-                    let auto = game_manager.switch_auto();
-                    audio_manager.set_play_scheduled(auto)?;
-                    sound_effect_event_watch.set_activated(!auto);
+                    *auto = !*auto;
+                    audio_manager.set_play_scheduled(*auto)?;
+                    sound_effect_event_watch.set_activated(!*auto);
                 }
                 _ => {}
             },

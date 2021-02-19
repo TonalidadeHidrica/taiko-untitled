@@ -59,7 +59,7 @@ impl<'a> PausedScore<'a> {
 
 pub enum PauseBreak {
     Exit,
-    Play(f64),
+    Play(f64, bool),
 }
 
 pub fn pause<P>(
@@ -71,6 +71,7 @@ pub fn pause<P>(
     _tja_file_name: P,
     song: &Song,
     time: f64,
+    mut auto: bool,
 ) -> Result<PauseBreak, TaikoError>
 where
     P: AsRef<Path>,
@@ -97,6 +98,7 @@ where
             &score,
             &mut music_position,
             &mut branch,
+            &mut auto,
         )? {
             break Ok(res);
         }
@@ -111,6 +113,7 @@ fn pause_loop<E>(
     score: &PausedScore,
     music_position: &mut E,
     branch: &mut ValueWithUpdateTime<BranchAnimationState>,
+    auto: &mut bool,
 ) -> Result<Option<PauseBreak>, TaikoError>
 where
     E: EasingF64,
@@ -123,8 +126,9 @@ where
                 ..
             } => match keycode {
                 Keycode::Space => {
-                    return Ok(Some(PauseBreak::Play(music_position.get())));
+                    return Ok(Some(PauseBreak::Play(music_position.get(), *auto)));
                 }
+                Keycode::F1 => *auto = !*auto,
                 Keycode::PageDown => music_position.set_with(|x| {
                     score
                         .measure_scroll_points
