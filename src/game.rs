@@ -2,7 +2,8 @@ use crate::assets::Assets;
 use crate::audio::SoundBuffer;
 use crate::audio::{AudioManager, SoundEffectSchedule};
 use crate::config::TaikoConfig;
-use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError, TaikoErrorCause};
+use crate::errors::no_score_in_tja;
+use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError};
 use crate::game_graphics::game_rect;
 use crate::game_graphics::{
     draw_background, draw_bar_lines, draw_branch_overlay, draw_combo, draw_flying_notes,
@@ -60,12 +61,8 @@ pub fn game<P>(
 where
     P: AsRef<Path>,
 {
-    let song = load_tja_from_file(&tja_file_name)
+    let mut song = load_tja_from_file(&tja_file_name)
         .map_err(|e| new_tja_error("Failed to load tja file", e))?;
-    let score = song.score.as_ref().ok_or_else(|| TaikoError {
-        message: "There is no score in the tja file".to_owned(),
-        cause: TaikoErrorCause::None,
-    })?;
 
     if let Some(song_wave_path) = &song.wave {
         audio_manager.load_music(song_wave_path)?;
@@ -76,20 +73,39 @@ where
         speed: 1.0,
     };
 
-    loop {
-        match pause(
-            config,
-            canvas,
-            event_pump,
-            audio_manager,
-            assets,
-            &tja_file_name,
-            &song,
-            game_user_state,
-        )? {
-            PauseBreak::Exit => break Ok(GameMode::Exit),
-            PauseBreak::Play(new_state) => game_user_state = new_state,
+    'entireLoop: loop {
+        loop {
+            match pause(
+                config,
+                canvas,
+                event_pump,
+                audio_manager,
+                assets,
+                &tja_file_name,
+                &song,
+                game_user_state,
+            )? {
+                PauseBreak::Exit => break 'entireLoop Ok(GameMode::Exit),
+                PauseBreak::Play(new_state) => {
+                    game_user_state = new_state;
+                    break;
+                }
+                PauseBreak::Reload => {
+                    match load_tja_from_file(&tja_file_name)
+                        .map_err(|e| new_tja_error("Failed to load tja file", e))
+                        .and_then(|song| match song.score {
+                            Some(..) => Ok(song),
+                            None => Err(no_score_in_tja()),
+                        }) {
+                        Ok(new_song) => song = new_song,
+                        Err(e) => {
+                            println!("Failed to load tja file: {:?}", e);
+                        }
+                    };
+                }
+            }
         }
+        let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
         match play(
             config,
             canvas,
@@ -98,7 +114,7 @@ where
             timer_subsystem,
             audio_manager,
             assets,
-            &score,
+            score,
             &mut game_user_state,
         )? {
             GameBreak::Exit => break Ok(GameMode::Exit),
@@ -123,7 +139,7 @@ fn play(
     let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
     sound_effect_event_watch.set_activated(!game_user_state.auto);
 
-    audio_manager.sound_effect_receiver.try_iter().count();  // Consume all
+    audio_manager.sound_effect_receiver.try_iter().count(); // Consume all
     audio_manager.set_play_speed(game_user_state.speed)?;
     audio_manager.seek(game_user_state.time)?;
     let mut auto_sent_pointer = 0;

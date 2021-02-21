@@ -96,3 +96,10 @@ where
         cause: TaikoErrorCause::TjaLoadError(tja_error),
     }
 }
+
+pub fn no_score_in_tja() -> TaikoError {
+    TaikoError {
+        message: "There is no score in the tja file".to_owned(),
+        cause: TaikoErrorCause::None,
+    }
+}

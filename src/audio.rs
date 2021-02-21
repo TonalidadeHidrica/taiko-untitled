@@ -172,8 +172,7 @@ impl<T: Send + 'static> AudioManager<T> {
         self.sender_to_audio
             .send(MessageToAudio::SetPlaySpeed(speed))
             .map_err(|_| TaikoError {
-                message: "Failed to set play speed; the audio stream has been stopped"
-                    .to_string(),
+                message: "Failed to set play speed; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -388,7 +387,8 @@ impl<T> AudioThreadState<T> {
                             }) {
                                 Ok(sample_count) => {
                                     self.skip_sample_count = (-time.min(0.0)
-                                        * self.stream_config.sample_rate.0 as f64 / self.play_speed)
+                                        * self.stream_config.sample_rate.0 as f64
+                                        / self.play_speed)
                                         as usize
                                         * (self.stream_config.channels as usize);
                                     self.played_sample_count = sample_count as usize;
@@ -414,9 +414,11 @@ impl<T> AudioThreadState<T> {
                     MessageToAudio::SetPlaySpeed(speed) => {
                         self.play_speed = speed;
                         if let Some(music) = &mut self.music {
-                            music.set_output_sample_rate(self.stream_config.sample_rate.0 as f64 / speed);
+                            music.set_output_sample_rate(
+                                self.stream_config.sample_rate.0 as f64 / speed,
+                            );
                         };
-                    },
+                    }
                     MessageToAudio::AddPlay(source) => {
                         self.sound_effects.push(source);
                     }
@@ -448,7 +450,8 @@ impl<T> AudioThreadState<T> {
 
                 let music_position_start = self.music_position_start() * self.play_speed;
                 let music_position_end = (self.played_sample_count + playing_sample_count) as f64
-                    / self.stream_config.sample_rate.0 as f64 * self.play_speed;
+                    / self.stream_config.sample_rate.0 as f64
+                    * self.play_speed;
 
                 if let Some(playback_position) = self.playback_position_ptr.upgrade() {
                     let mut playback_position = playback_position
@@ -458,7 +461,7 @@ impl<T> AudioThreadState<T> {
                     *playback_position = PlaybackPosition::Playing {
                         instant,
                         music_position: music_position_start,
-                        play_speed: self.play_speed
+                        play_speed: self.play_speed,
                     };
                 }
 
@@ -473,8 +476,8 @@ impl<T> AudioThreadState<T> {
                     let mut source = next.source;
                     source.wait = (self.stream_config.channels as f64
                         * (next.timestamp - music_position_start)
-                        * self.stream_config.sample_rate.0 as f64 * self.play_speed)
-                        as usize;
+                        * self.stream_config.sample_rate.0 as f64
+                        * self.play_speed) as usize;
                     self.sound_effects.push(source);
                     self.sound_effect_sender
                         .send(next.response)

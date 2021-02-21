@@ -13,9 +13,9 @@ use sdl2::EventPump;
 use crate::assets::Assets;
 use crate::audio::AudioManager;
 use crate::config::TaikoConfig;
+use crate::errors::no_score_in_tja;
 use crate::errors::to_sdl_error;
 use crate::errors::TaikoError;
-use crate::errors::TaikoErrorCause;
 use crate::game::AutoEvent;
 use crate::game::GameUserState;
 use crate::game_graphics::draw_background;
@@ -60,6 +60,7 @@ impl<'a> PausedScore<'a> {
 
 pub enum PauseBreak {
     Play(GameUserState),
+    Reload,
     Exit,
 }
 
@@ -76,10 +77,7 @@ pub fn pause<P>(
 where
     P: AsRef<Path>,
 {
-    let score = song.score.as_ref().ok_or_else(|| TaikoError {
-        message: "There is no score in the tja file".to_owned(),
-        cause: TaikoErrorCause::None,
-    })?;
+    let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
     let score = PausedScore::new(score);
 
     audio_manager.pause()?;
@@ -129,6 +127,9 @@ where
                 Keycode::Space => {
                     game_user_state.time = music_position.get();
                     return Ok(Some(PauseBreak::Play(*game_user_state)));
+                }
+                Keycode::Q => {
+                    return Ok(Some(PauseBreak::Reload));
                 }
                 Keycode::F1 => game_user_state.auto = !game_user_state.auto,
                 Keycode::PageDown => music_position.set_with(|x| {
