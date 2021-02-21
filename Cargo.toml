@@ -28,3 +28,4 @@ sdl2-sys = { version = "0.34.3", path = "../rust-sdl2/sdl2-sys/" }
 rodio = { version = "0.13.0", path = "../rodio" }
 ogg = { version = "0.8.0", path = "../ogg" }
 lewton = { version = "0.10.2", path = "../lewton" }
+notify = "4.0.15"

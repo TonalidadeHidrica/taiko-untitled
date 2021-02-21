@@ -23,6 +23,8 @@ use crate::structs::{
 use crate::tja::load_tja_from_file;
 use crate::utils::to_digits;
 use itertools::{iterate, Itertools};
+use notify::RecursiveMode;
+use notify::Watcher;
 use num::clamp;
 use sdl2::event::{Event, EventWatch, EventWatchCallback};
 use sdl2::keyboard::{Keycode, Mod};
@@ -31,6 +33,7 @@ use sdl2::{EventPump, EventSubsystem, TimerSubsystem};
 use std::convert::TryInto;
 use std::iter::Peekable;
 use std::path::Path;
+use std::sync::mpsc;
 use std::time::Duration;
 
 type ScoreOfGameState = TypedScore<OfGameState>;
@@ -59,7 +62,7 @@ pub fn game<P>(
     tja_file_name: P,
 ) -> Result<GameMode, TaikoError>
 where
-    P: AsRef<Path>,
+    P: AsRef<Path> + std::fmt::Debug,
 {
     let mut song = load_tja_from_file(&tja_file_name)
         .map_err(|e| new_tja_error("Failed to load tja file", e))?;
@@ -73,6 +76,29 @@ where
         speed: 1.0,
     };
 
+    // File watcher
+    let (file_change_sender, file_change_receiver) = mpsc::channel();
+    let _watcher = match notify::watcher(file_change_sender, Duration::from_millis(500)) {
+        Ok(mut watcher) => {
+            if let Err(e) = watcher.watch(&tja_file_name, RecursiveMode::NonRecursive) {
+                println!(
+                    "Failed to create file watcher.  The file will not be reloaded automatically."
+                );
+                println!("Caused by: {:?}", e);
+            } else {
+                println!("Start watching {:?}", &tja_file_name);
+            }
+            Some(watcher)
+        }
+        Err(e) => {
+            println!(
+                "Failed to create file watcher.  The file will not be reloaded automatically."
+            );
+            println!("Caused by: {:?}", e);
+            None
+        }
+    };
+
     'entireLoop: loop {
         loop {
             match pause(
@@ -81,7 +107,7 @@ where
                 event_pump,
                 audio_manager,
                 assets,
-                &tja_file_name,
+                &file_change_receiver,
                 &song,
                 game_user_state,
             )? {

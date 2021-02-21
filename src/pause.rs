@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use itertools::iterate;
@@ -64,19 +64,16 @@ pub enum PauseBreak {
     Exit,
 }
 
-pub fn pause<P>(
+pub fn pause(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
     audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
-    _tja_file_name: P,
+    file_change_receiver: &Receiver<notify::DebouncedEvent>,
     song: &Song,
     mut game_user_state: GameUserState,
-) -> Result<PauseBreak, TaikoError>
-where
-    P: AsRef<Path>,
-{
+) -> Result<PauseBreak, TaikoError> {
     let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
     let score = PausedScore::new(score);
 
@@ -100,6 +97,10 @@ where
             &mut game_user_state,
         )? {
             break Ok(res);
+        }
+
+        if file_change_receiver.try_iter().count() > 0 {
+            break Ok(PauseBreak::Reload);
         }
     }
 }
