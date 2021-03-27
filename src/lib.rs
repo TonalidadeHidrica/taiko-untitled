@@ -10,7 +10,6 @@ pub mod game_graphics;
 pub mod game_manager;
 pub mod mode;
 pub mod pause;
-pub mod rodio;
 pub mod tja;
 pub mod utils;
 pub mod value_with_update_time;

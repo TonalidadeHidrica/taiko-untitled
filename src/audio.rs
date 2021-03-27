@@ -1,5 +1,5 @@
 use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
-use crate::rodio::{new_uniform_source_iterator, TrueUniformSourceIterator};
+use universal_audio_decoder::{new_uniform_source_iterator, TrueUniformSourceIterator};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
 use itertools::Itertools;
