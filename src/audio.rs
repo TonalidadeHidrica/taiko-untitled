@@ -1,5 +1,4 @@
 use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
-use universal_audio_decoder::{new_uniform_source_iterator, TrueUniformSourceIterator};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
 use itertools::Itertools;
@@ -14,6 +13,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
+use universal_audio_decoder::{new_uniform_source_iterator, TrueUniformSourceIterator};
 
 pub struct AudioManager<T> {
     pub stream_config: StreamConfig,
