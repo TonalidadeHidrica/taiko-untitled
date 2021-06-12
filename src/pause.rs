@@ -163,8 +163,8 @@ where
                 }),
                 Keycode::Up => branch.update(|b| b.set(b.get().saturating_next(), 0.0)),
                 Keycode::Down => branch.update(|b| b.set(b.get().saturating_prev(), 0.0)),
-                Keycode::Num1 => game_user_state.speed = (game_user_state.speed / 2.0).max(0.25),
-                Keycode::Num2 => game_user_state.speed = (game_user_state.speed * 2.0).min(1.0),
+                Keycode::Num1 => game_user_state.speed = (game_user_state.speed / 2.0f64.powf(1./12.)).max(0.25),
+                Keycode::Num2 => game_user_state.speed = (game_user_state.speed * 2.0f64.powf(1./12.)).min(1.0),
                 _ => {}
             },
             _ => {}
