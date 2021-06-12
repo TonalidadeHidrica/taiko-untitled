@@ -520,6 +520,7 @@ fn process_key_event(
     if let Some(music_position) = music_position {
         game_manager.hit(
             Some(color),
+            // TODO sometimes, timestamp is less than sdl timestamp
             music_position + (timestamp - sdl_timestamp) as f64 / 1000.0,
         );
     }
