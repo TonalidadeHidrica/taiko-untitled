@@ -362,28 +362,20 @@ pub fn draw_gauge(
 }
 
 fn interpolate_color(color_zero: Color, color_one: Color, t: f64) -> Color {
-    Color::RGBA(
-        clamp(
-            color_zero.r as f64 * (1.0 - t) + color_one.r as f64 * t,
-            0.0,
-            255.0,
-        ) as u8,
-        clamp(
-            color_zero.g as f64 * (1.0 - t) + color_one.g as f64 * t,
-            0.0,
-            255.0,
-        ) as u8,
-        clamp(
-            color_zero.b as f64 * (1.0 - t) + color_one.b as f64 * t,
-            0.0,
-            255.0,
-        ) as u8,
-        clamp(
-            color_zero.a as f64 * (1.0 - t) + color_one.a as f64 * t,
-            0.0,
-            255.0,
-        ) as u8,
-    )
+    let Color {
+        r: r0,
+        g: g0,
+        b: b0,
+        a: a0,
+    } = color_zero;
+    let Color {
+        r: r1,
+        g: g1,
+        b: b1,
+        a: a1,
+    } = color_one;
+    let f = |x, y| clamp(x as f64 * (1.0 - t) + y as f64 * t, 0.0, 255.0) as u8;
+    Color::RGBA(f(r0, r1), f(g0, g1), f(b0, b1), f(a0, a1))
 }
 
 fn get_x(music_position: f64, time: f64, scroll_speed: Bpm) -> f64 {
