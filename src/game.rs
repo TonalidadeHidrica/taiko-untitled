@@ -366,7 +366,7 @@ impl<'a> EventWatchCallback for SoundEffectCallback<'a> {
                     // TODO send error to main thread
                     let _ = self.audio_manager.add_play(&self.sound_don);
                 }
-                Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
+                Keycode::A | Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
                     // TODO send error to main thread
                     let _ = self.audio_manager.add_play(&self.sound_ka);
                 }
