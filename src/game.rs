@@ -51,6 +51,7 @@ pub struct GameUserState {
     pub speed: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn game<P>(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
@@ -150,6 +151,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn play(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,

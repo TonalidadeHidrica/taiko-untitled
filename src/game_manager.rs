@@ -584,7 +584,10 @@ mod tests {
     fn f64_has_enough_precision() {
         let mut f = 0.0;
         for i in 0..=10000 {
-            assert_eq!(f, i as f32);
+            #[allow(clippy::float_cmp)]
+            {
+                assert_eq!(f, i as f32);
+            }
             f += 1.0;
         }
     }

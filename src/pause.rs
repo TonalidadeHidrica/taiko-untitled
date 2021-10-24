@@ -64,6 +64,7 @@ pub enum PauseBreak {
     Exit,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pause(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
@@ -105,6 +106,7 @@ pub fn pause(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pause_loop<E>(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,

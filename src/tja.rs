@@ -741,6 +741,9 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
     Ok(song)
 }
 
+// Rationale: the redundant pattern matches are temporary placeholders
+// that will be replaced with concrete implementations in the future.
+#[allow(clippy::redundant_pattern_matching)]
 fn load_tja_metadata<'a, I>(song: &mut Song, lines: &mut I) -> Option<Player>
 where
     I: Iterator<Item = &'a str>,
@@ -896,6 +899,11 @@ parse_integer!(u64 u32 i64);
 mod tests {
     use super::ParseFirst;
 
+    // Rationale: we know that these floats are represented precisely.
+    #[allow(clippy::float_cmp)]
+    // Rationale: this is definetely a false positive,
+    // where what we want is the result of parse, not the mathematical constant.
+    #[allow(clippy::approx_constant)]
     #[test]
     fn test_parse_f64() {
         assert_eq!("3.14".parse_first(), Some(3.14));
