@@ -492,6 +492,11 @@ impl GameManager {
     }
 }
 
+// TODO this allowance should be removed when updating to 1.57.0 .
+// There is a bug in cargo clippy, filed in rust-lang/rust-clippy#7580
+// and fixed by rust-lang/rust#88175 .
+// #[cfg_attr(version("1.56.0"), allow(clippy::blocks_in_if_conditions))]
+#[allow(clippy::blocks_in_if_conditions)]
 fn branch_at(branches: &[Branch], branch_pointer: &mut usize, time: f64) -> BranchType {
     while branches.get(*branch_pointer).map_or(false, |branch| {
         branch.switch_time <= time && branch.info.determined_branch.is_some()

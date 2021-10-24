@@ -163,7 +163,7 @@ fn play(
     score: &Score,
     game_user_state: &mut GameUserState,
 ) -> Result<GameBreak, TaikoError> {
-    let mut game_manager = GameManager::new(&score);
+    let mut game_manager = GameManager::new(score);
     let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
     sound_effect_event_watch.set_activated(!game_user_state.auto);
 
@@ -190,7 +190,7 @@ fn play(
             timer_subsystem,
             audio_manager,
             assets,
-            &score,
+            score,
             &mut game_manager,
             &mut sound_effect_event_watch,
             &mut auto_sent_pointer,
