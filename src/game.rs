@@ -236,8 +236,7 @@ fn game_loop(
                 | Keycode::A
                 | Keycode::S
                 | Keycode::Colon
-                | Keycode::RightBracket
-                => {
+                | Keycode::RightBracket => {
                     if !*auto {
                         process_key_event(
                             keycode,
@@ -514,7 +513,11 @@ fn process_key_event(
 ) {
     let color = match keycode {
         Keycode::X | Keycode::Slash | Keycode::S | Keycode::Colon => NoteColor::Don,
-        Keycode::Z | Keycode::Underscore | Keycode::Backslash | Keycode::A | Keycode::RightBracket => NoteColor::Ka,
+        Keycode::Z
+        | Keycode::Underscore
+        | Keycode::Backslash
+        | Keycode::A
+        | Keycode::RightBracket => NoteColor::Ka,
         _ => unreachable!(),
     };
     if let Some(music_position) = music_position {
