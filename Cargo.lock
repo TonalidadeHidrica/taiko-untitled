@@ -1223,7 +1223,6 @@ dependencies = [
  "retain_mut",
  "rodio",
  "sdl2",
- "sdl2-sys",
  "serde 1.0.115",
  "universal-audio-decoder",
 ]
