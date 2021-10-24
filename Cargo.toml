@@ -22,8 +22,7 @@ derive_more = "0.99.11"
 once_cell = "1.5.2"
 regex = "1.4.2"
 
-sdl2 = { version = "0.34.4", features = ["image"], path = "../rust-sdl2" }
-# sdl2-sys = { version = "0.34.3", path = "../rust-sdl2/sdl2-sys/" }
+sdl2 = { version = "0.34.5", features = ["image"] }
 
 rodio = { version = "0.13.0", path = "../rodio" }
 universal-audio-decoder = { path = "../universal-audio-decoder/" }
