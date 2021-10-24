@@ -1,5 +1,4 @@
 use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
-use crate::rodio::{new_uniform_source_iterator, TrueUniformSourceIterator};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
 use itertools::Itertools;
@@ -14,38 +13,61 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
+use universal_audio_decoder::{new_uniform_source_iterator, TrueUniformSourceIterator};
 
-pub struct AudioManager {
+pub struct AudioManager<T> {
     pub stream_config: StreamConfig,
-    sender_to_audio: Sender<MessageToAudio>,
+    sender_to_audio: Sender<MessageToAudio<T>>,
     drop_sender: Sender<()>,
-    playback_position: Arc<Mutex<Option<PlaybackPosition>>>,
+    pub sound_effect_receiver: Receiver<T>,
+    playback_position: Arc<Mutex<PlaybackPosition>>,
 }
 
-struct PlaybackPosition {
-    instant: Instant,
-    music_position: f64,
+enum PlaybackPosition {
+    NotStarted,
+    Seeking {
+        music_position: f64,
+    },
+    Paused {
+        music_position: f64,
+    },
+    Playing {
+        instant: Instant,
+        music_position: f64,
+        play_speed: f64,
+    },
 }
 
-enum MessageToAudio {
+enum MessageToAudio<T> {
     Play,
+    Pause,
+    Seek(f64),
     LoadMusic(PathBuf),
-    SetMusicVolume(f32),
     AddPlay(SoundBufferSource),
-    AddSchedules(Vec<SoundEffectSchedule>),
+
+    SetMusicVolume(f32),
+    SetPlaySpeed(f64),
+
+    AddSchedules(Vec<SoundEffectSchedule<T>>),
+    CleanSchedules,
     SwitchScheduled(bool),
 }
 
-impl AudioManager {
-    pub fn new() -> Result<AudioManager, TaikoError> {
+impl<T: Send + 'static> AudioManager<T> {
+    pub fn new() -> Result<AudioManager<T>, TaikoError> {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
         let (stream_config_sender, stream_config_receiver) = mpsc::channel();
         let (drop_sender, drop_receiver) = mpsc::channel();
-        let playback_position = Arc::new(Mutex::new(None));
+        let (sound_effect_sender, sound_effect_receiver) = mpsc::channel();
+        let playback_position = Arc::new(Mutex::new(PlaybackPosition::NotStarted));
 
         let playback_position_ptr = Arc::downgrade(&playback_position);
-        thread::spawn(
-            move || match stream_thread(receiver_to_audio, playback_position_ptr) {
+        thread::spawn(move || {
+            match stream_thread(
+                receiver_to_audio,
+                sound_effect_sender,
+                playback_position_ptr,
+            ) {
                 Err(err) => {
                     if stream_config_sender.send(Err(err)).is_err() {
                         eprintln!("Failed to send error info to main thread.");
@@ -58,8 +80,8 @@ impl AudioManager {
                     // preserve stream until "drop" signal is sent from main thread
                     drop_receiver.recv().ok();
                 }
-            },
-        );
+            }
+        });
         let stream_config = stream_config_receiver.recv().map_err(|_| TaikoError {
             message: "Audio device initialization thread has been stopped".to_string(),
             cause: TaikoErrorCause::None,
@@ -69,6 +91,7 @@ impl AudioManager {
             stream_config,
             sender_to_audio,
             drop_sender,
+            sound_effect_receiver,
             playback_position,
         })
     }
@@ -94,12 +117,62 @@ impl AudioManager {
             })
     }
 
+    pub fn pause(&self) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::Pause)
+            .map_err(|_| TaikoError {
+                message: "Failed to pause music; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn seek(&self, time: f64) -> Result<(), TaikoError> {
+        {
+            // TODO there should be a better way
+            let mut playback_position = self.playback_position.lock().map_err(|_| TaikoError {
+                message: "Failed to obtain music position; the audio stream has been panicked"
+                    .to_string(),
+                cause: TaikoErrorCause::None,
+            })?;
+            *playback_position = PlaybackPosition::Seeking {
+                music_position: time,
+            };
+        }
+        self.sender_to_audio
+            .send(MessageToAudio::Seek(time))
+            .map_err(|_| TaikoError {
+                message: "Failed to seek; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn playing(&self) -> Result<bool, TaikoError> {
+        let playback_position = self.playback_position.lock().map_err(|_| TaikoError {
+            message: "Failed to obtain music position; the audio stream has been panicked"
+                .to_string(),
+            cause: TaikoErrorCause::None,
+        })?;
+        Ok(matches!(
+            *playback_position,
+            PlaybackPosition::Playing { .. }
+        ))
+    }
+
     pub fn set_music_volume(&self, volume: f32) -> Result<(), TaikoError> {
         self.sender_to_audio
             .send(MessageToAudio::SetMusicVolume(volume))
             .map_err(|_| TaikoError {
                 message: "Failed to set music volume; the audio stream has been stopped"
                     .to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn set_play_speed(&self, speed: f64) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::SetPlaySpeed(speed))
+            .map_err(|_| TaikoError {
+                message: "Failed to set play speed; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -115,12 +188,21 @@ impl AudioManager {
 
     pub fn add_play_schedules(
         &self,
-        schedules: Vec<SoundEffectSchedule>,
+        schedules: Vec<SoundEffectSchedule<T>>,
     ) -> Result<(), TaikoError> {
         self.sender_to_audio
             .send(MessageToAudio::AddSchedules(schedules))
             .map_err(|_| TaikoError {
                 message: "Failed to push schedules; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn clear_play_schedules(&self) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::CleanSchedules)
+            .map_err(|_| TaikoError {
+                message: "Failed to clear schedules; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -142,21 +224,32 @@ impl AudioManager {
                 .to_string(),
             cause: TaikoErrorCause::None,
         })?;
-        Ok(playback_position.as_ref().map(|playback_position| {
-            let now = Instant::now();
-            let diff = if now > playback_position.instant {
-                (now - playback_position.instant).as_secs_f64()
-            } else {
-                -(playback_position.instant - now).as_secs_f64()
-            };
-            diff + playback_position.music_position
-        }))
+        use PlaybackPosition::*;
+        let res = match *playback_position {
+            Playing {
+                music_position,
+                instant,
+                play_speed,
+            } => {
+                let now = Instant::now();
+                let diff = if now > instant {
+                    (now - instant).as_secs_f64() * play_speed
+                } else {
+                    -(instant - now).as_secs_f64() * play_speed
+                };
+                Some(music_position + diff)
+            }
+            Paused { music_position } | Seeking { music_position } => Some(music_position),
+            NotStarted => None,
+        };
+        Ok(res)
     }
 }
 
-fn stream_thread(
-    receiver_to_audio: Receiver<MessageToAudio>,
-    playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
+fn stream_thread<T: Send + 'static>(
+    receiver_to_audio: Receiver<MessageToAudio<T>>,
+    sound_effect_sender: Sender<T>,
+    playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
 ) -> Result<(StreamConfig, Stream), TaikoError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or_else(|| TaikoError {
@@ -185,6 +278,7 @@ fn stream_thread(
     let state = AudioThreadState::new(
         stream_config.clone(),
         receiver_to_audio,
+        sound_effect_sender,
         playback_position_ptr,
     );
     let error_callback = |err| eprintln!("an error occurred on stream: {:?}", err);
@@ -210,7 +304,7 @@ fn stream_thread(
     Ok((stream_config, stream))
 }
 
-impl Drop for AudioManager {
+impl<T> Drop for AudioManager<T> {
     fn drop(&mut self) {
         if self.drop_sender.send(()).is_err() {
             eprintln!("Failed to send drop signal to audio stream thread");
@@ -220,32 +314,38 @@ impl Drop for AudioManager {
 
 type MusicSource = TrueUniformSourceIterator<Decoder<BufReader<File>>>;
 
-struct AudioThreadState {
+struct AudioThreadState<T> {
     stream_config: StreamConfig,
 
     music: Option<MusicSource>,
     sound_effects: Vec<SoundBufferSource>,
 
-    sound_effect_schedules: VecDeque<SoundEffectSchedule>,
+    sound_effect_schedules: VecDeque<SoundEffectSchedule<T>>,
     scheduled_play_enabled: bool,
 
-    receiver_to_audio: mpsc::Receiver<MessageToAudio>,
+    receiver_to_audio: Receiver<MessageToAudio<T>>,
+    sound_effect_sender: Sender<T>,
     playing: bool,
     played_sample_count: usize,
-    playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
+    skip_sample_count: usize,
+    playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     music_volume: f32,
+    play_speed: f64,
 }
 
-pub struct SoundEffectSchedule {
+pub struct SoundEffectSchedule<T> {
     pub timestamp: f64,
     pub source: SoundBufferSource,
+    pub volume: f64,
+    pub response: T,
 }
 
-impl AudioThreadState {
+impl<T> AudioThreadState<T> {
     pub fn new(
         stream_config: StreamConfig,
-        receiver_to_audio: mpsc::Receiver<MessageToAudio>,
-        playback_position_ptr: Weak<Mutex<Option<PlaybackPosition>>>,
+        receiver_to_audio: mpsc::Receiver<MessageToAudio<T>>,
+        sound_effect_sender: Sender<T>,
+        playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     ) -> Self {
         AudioThreadState {
             stream_config,
@@ -256,10 +356,13 @@ impl AudioThreadState {
             scheduled_play_enabled: false,
 
             receiver_to_audio,
+            sound_effect_sender,
             playing: false,
             played_sample_count: 0,
+            skip_sample_count: 0,
             playback_position_ptr,
             music_volume: 1.0,
+            play_speed: 1.0,
         }
     }
 
@@ -271,13 +374,56 @@ impl AudioThreadState {
             for message in self.receiver_to_audio.try_iter() {
                 match message {
                     MessageToAudio::Play => self.playing = true,
+                    MessageToAudio::Pause => {
+                        self.playing = false;
+                        self.update_pause_state();
+                    }
+                    MessageToAudio::Seek(time) => {
+                        // TODO refactoring
+                        if let Err(e) = if let (Some(music), false) = (&mut self.music, false) {
+                            match music.seek(time.max(0.0)).map_err(|e| TaikoError {
+                                message: e,
+                                cause: TaikoErrorCause::None,
+                            }) {
+                                Ok(sample_count) => {
+                                    self.skip_sample_count = (-time.min(0.0)
+                                        * self.stream_config.sample_rate.0 as f64
+                                        / self.play_speed)
+                                        as usize
+                                        * (self.stream_config.channels as usize);
+                                    self.played_sample_count = sample_count as usize;
+                                    self.update_pause_state();
+                                    Ok(())
+                                }
+                                Err(e) => Err(e),
+                            }
+                        } else {
+                            Err(TaikoError {
+                                message: "Music is empty or playing".to_owned(),
+                                cause: TaikoErrorCause::None,
+                            })
+                        } {
+                            println!("Failed to seek: {:?}", e);
+                        }
+                    }
                     MessageToAudio::LoadMusic(path) => {
                         // TODO send error via another channel
                         self.music = Some(self.load_music(path).unwrap())
                     }
                     MessageToAudio::SetMusicVolume(volume) => self.music_volume = volume,
+                    MessageToAudio::SetPlaySpeed(speed) => {
+                        self.play_speed = speed;
+                        if let Some(music) = &mut self.music {
+                            music.set_output_sample_rate(
+                                self.stream_config.sample_rate.0 as f64 / speed,
+                            );
+                        };
+                    }
                     MessageToAudio::AddPlay(source) => {
                         self.sound_effects.push(source);
+                    }
+                    MessageToAudio::CleanSchedules => {
+                        self.sound_effect_schedules.clear();
                     }
                     MessageToAudio::AddSchedules(mut schedules) => {
                         schedules.sort_unstable_by(|x, y| {
@@ -302,20 +448,21 @@ impl AudioThreadState {
 
                 let playing_sample_count = output.len() / (self.stream_config.channels as usize);
 
-                let music_position_start =
-                    self.played_sample_count as f64 / self.stream_config.sample_rate.0 as f64;
+                let music_position_start = self.music_position_start() * self.play_speed;
                 let music_position_end = (self.played_sample_count + playing_sample_count) as f64
-                    / self.stream_config.sample_rate.0 as f64;
+                    / self.stream_config.sample_rate.0 as f64
+                    * self.play_speed;
 
                 if let Some(playback_position) = self.playback_position_ptr.upgrade() {
                     let mut playback_position = playback_position
                         .lock()
                         .map_err(|e| format!("The main thread has been panicked: {}", e))
                         .unwrap(); // Intentionally panic when error
-                    *playback_position = Some(PlaybackPosition {
+                    *playback_position = PlaybackPosition::Playing {
                         instant,
                         music_position: music_position_start,
-                    });
+                        play_speed: self.play_speed,
+                    };
                 }
 
                 while let Some(next) = self.sound_effect_schedules.front() {
@@ -323,28 +470,40 @@ impl AudioThreadState {
                         break;
                     }
                     let next = self.sound_effect_schedules.pop_front().unwrap();
-                    if !self.scheduled_play_enabled {
+                    if next.timestamp < music_position_start || !self.scheduled_play_enabled {
                         continue;
                     }
                     let mut source = next.source;
                     source.wait = (self.stream_config.channels as f64
                         * (next.timestamp - music_position_start)
-                        * self.stream_config.sample_rate.0 as f64)
-                        as usize;
+                        * self.stream_config.sample_rate.0 as f64
+                        * self.play_speed) as usize;
                     self.sound_effects.push(source);
+                    self.sound_effect_sender
+                        .send(next.response)
+                        .map_err(|e| format!("The main thread has been panicked: {}", e))
+                        .unwrap(); // Intentionally panic when error
                 }
 
-                self.played_sample_count += playing_sample_count;
+                // TODO: SPAGHETTI CODE!
+                self.played_sample_count += output.len().saturating_sub(self.skip_sample_count)
+                    / (self.stream_config.channels as usize)
             }
 
             for out in output.iter_mut() {
-                let mut next = if let (Some(ref mut music), true) = (&mut self.music, self.playing)
-                {
-                    music.next().map(|a| a * self.music_volume)
-                } else {
-                    None
+                let mut next = match &mut self.music {
+                    Some(music) if self.playing => {
+                        if self.skip_sample_count > 0 {
+                            self.skip_sample_count -= 1;
+                            None
+                        } else {
+                            music.next().map(|a| a * self.music_volume)
+                        }
+                    }
+                    _ => None,
                 }
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+                .clamp(-4.0, 4.0); // Prevent too large sound
 
                 self.sound_effects.retain_mut(|source| match source.next() {
                     Some(value) => {
@@ -358,6 +517,24 @@ impl AudioThreadState {
         }
     }
 
+    fn update_pause_state(&self) {
+        if let Some(playback_position) = self.playback_position_ptr.upgrade() {
+            let mut playback_position = playback_position
+                .lock()
+                .map_err(|e| format!("The main thread has been panicked: {}", e))
+                .unwrap(); // Intentionally panic when error
+            *playback_position = PlaybackPosition::Paused {
+                music_position: self.music_position_start(),
+            };
+        }
+    }
+
+    fn music_position_start(&self) -> f64 {
+        let sample_index = self.played_sample_count as isize
+            - self.skip_sample_count as isize / self.stream_config.channels as isize;
+        sample_index as f64 / self.stream_config.sample_rate.0 as f64
+    }
+
     pub fn load_music(&self, wave: PathBuf) -> Result<MusicSource, TaikoError> {
         let file = std::fs::File::open(wave).map_err(|e| TaikoError {
             message: "Failed to open music file".to_string(),
@@ -367,7 +544,6 @@ impl AudioThreadState {
             message: "Failed to decode music".to_string(),
             cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::DecoderError(e)),
         })?;
-
         let ret = new_uniform_source_iterator(decoder, &self.stream_config);
         Ok(ret)
     }

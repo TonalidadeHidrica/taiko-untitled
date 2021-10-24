@@ -208,7 +208,7 @@ impl ScoreParser<'_> {
             if line.starts_with("#END") {
                 ended_with_end = true;
                 break;
-            } else if let Some(bpm) = take_remaining("#BPMCHANGE", line) {
+            } else if let Some(bpm) = line.strip_prefix("#BPMCHANGE") {
                 if let Some(bpm) = bpm.parse_first() {
                     self.elements.push(TjaElement::BpmChange(bpm));
                 } else {
@@ -218,24 +218,24 @@ impl ScoreParser<'_> {
                 self.elements.push(TjaElement::Gogo(true));
             } else if line.starts_with("#GOGOEND") {
                 self.elements.push(TjaElement::Gogo(false));
-            } else if let Some(measure) = take_remaining("#MEASURE", line) {
+            } else if let Some(measure) = line.strip_prefix("#MEASURE") {
                 if let [x, y] = &measure.split('/').collect_vec()[..] {
                     if let (Some(x), Some(y)) = (x.parse_first(), y.parse_first()) {
                         self.elements.push(TjaElement::Measure(x, y));
                     }
                 }
-            } else if let Some(scroll) = take_remaining("#SCROLL", line) {
+            } else if let Some(scroll) = line.strip_prefix("#SCROLL") {
                 if let Some(scroll) = scroll.parse_first() {
                     self.elements.push(TjaElement::Scroll(scroll));
                 } else {
                     println!("Ignored: {}", line);
                 }
-            } else if let Some(delay) = take_remaining("#DELAY", line) {
+            } else if let Some(delay) = line.strip_prefix("#DELAY") {
                 if let Some(delay) = delay.parse_first() {
                     eprintln!("Delay is deprecated, so it may not work properly.");
                     self.elements.push(TjaElement::Delay(delay));
                 }
-            } else if let Some(branch_condition) = take_remaining("#BRANCHSTART", line) {
+            } else if let Some(branch_condition) = line.strip_prefix("#BRANCHSTART") {
                 self.branch_start(branch_condition);
             } else if line.starts_with("#BRANCHEND") {
                 self.branch_end(true);
@@ -274,7 +274,7 @@ impl ScoreParser<'_> {
             }
         }
         self.score.notes.sort_by_key(|e| OrderedFloat::from(e.time));
-        return ended_with_end;
+        ended_with_end
     }
 
     fn terminate_measure(&mut self, ignore_notes: bool) {
@@ -721,6 +721,7 @@ pub fn load_tja_from_str(source: String) -> Result<Song, TjaError> {
     let mut song = Song::default();
 
     let mut lines = source.lines();
+    #[allow(clippy::never_loop)]
     loop {
         let player = load_tja_metadata(&mut song, lines.by_ref());
         let player = match player {
@@ -745,7 +746,7 @@ where
     I: Iterator<Item = &'a str>,
 {
     for line in lines {
-        if let Some(remaining) = take_remaining("#START", line) {
+        if let Some(remaining) = line.strip_prefix("#START") {
             let player = match remaining
                 .chars()
                 .skip_while(|c| *c != 'P' || *c != 'p')
@@ -756,16 +757,16 @@ where
                 _ => Player::Single,
             };
             return Some(player);
-        } else if let Some(title) = take_remaining("TITLE:", line) {
+        } else if let Some(title) = line.strip_prefix("TITLE:") {
             // TODO warnings on override
             song.title = Some(title.to_string());
-        } else if let Some(subtitle) = take_remaining("SUBTITLE:", line) {
-            if let Some(subtitle) = take_remaining("--", subtitle) {
+        } else if let Some(subtitle) = line.strip_prefix("SUBTITLE:") {
+            if let Some(subtitle) = subtitle.strip_prefix("--") {
                 song.subtitle = Some(Subtitle {
                     text: subtitle.to_string(),
                     style: SubtitleStyle::Suppress,
                 });
-            } else if let Some(subtitle) = take_remaining("++", subtitle) {
+            } else if let Some(subtitle) = subtitle.strip_prefix("++") {
                 song.subtitle = Some(Subtitle {
                     text: subtitle.to_string(),
                     style: SubtitleStyle::Show,
@@ -776,53 +777,53 @@ where
                     style: SubtitleStyle::Unspecified,
                 })
             }
-        } else if let Some(_level) = take_remaining("LEVEL:", line) {
+        } else if let Some(_level) = line.strip_prefix("LEVEL:") {
             eprintln!("Warning: LEVEL not implemented");
-        } else if let Some(bpm) = take_remaining("BPM:", line) {
+        } else if let Some(bpm) = line.strip_prefix("BPM:") {
             // TODO error warnings and wider accepted format
             if let Some(bpm) = bpm.parse_first() {
                 if bpm > 0.0 {
                     song.bpm = Bpm(bpm);
                 }
             }
-        } else if let Some(wave) = take_remaining("WAVE:", line) {
+        } else if let Some(wave) = line.strip_prefix("WAVE:") {
             song.wave = Some(Path::new(wave).to_path_buf());
-        } else if let Some(offset) = take_remaining("OFFSET:", line) {
+        } else if let Some(offset) = line.strip_prefix("OFFSET:") {
             if let Some(offset) = offset.parse_first() {
                 song.offset = offset;
             }
-        } else if let Some(balloon) = take_remaining("BALLOON:", line) {
+        } else if let Some(balloon) = line.strip_prefix("BALLOON:") {
             song.balloons = balloon
                 .split(',')
                 .filter_map(ParseFirst::parse_first)
                 .collect_vec();
-        } else if let Some(song_volume) = take_remaining("SONGVOL:", line) {
+        } else if let Some(song_volume) = line.strip_prefix("SONGVOL:") {
             if let Some(song_volume) = song_volume.parse_first() {
                 song.song_volume = min(song_volume, 5000);
             }
-        } else if let Some(se_volume) = take_remaining("SEVOL:", line) {
+        } else if let Some(se_volume) = line.strip_prefix("SEVOL:") {
             if let Some(se_volume) = se_volume.parse_first() {
                 song.se_volume = min(se_volume, 5000);
             }
-        } else if let Some(_) = take_remaining("SCOREINIT:", line) {
+        } else if let Some(_) = line.strip_prefix("SCOREINIT:") {
             eprintln!("Warning: SCOREINIT not implemented")
-        } else if let Some(_) = take_remaining("SCOREDIFF:", line) {
+        } else if let Some(_) = line.strip_prefix("SCOREDIFF:") {
             eprintln!("Warning: SCOREDIFF not implemented")
-        } else if let Some(_) = take_remaining("COURSE:", line) {
+        } else if let Some(_) = line.strip_prefix("COURSE:") {
             eprintln!("Warning: COURSE not implemented")
-        } else if let Some(_) = take_remaining("STYLE:", line) {
+        } else if let Some(_) = line.strip_prefix("STYLE:") {
             eprintln!("Warning: STYLE not implemented")
-        } else if let Some(_) = take_remaining("GAME:", line) {
+        } else if let Some(_) = line.strip_prefix("GAME:") {
             eprintln!("Warning: GAME not implemented")
-        } else if let Some(_) = take_remaining("LIFE:", line) {
+        } else if let Some(_) = line.strip_prefix("LIFE:") {
             eprintln!("Warning: LIFE not implemented")
-        } else if let Some(_) = take_remaining("DEMOSTART:", line) {
+        } else if let Some(_) = line.strip_prefix("DEMOSTART:") {
             eprintln!("Warning: DEMOSTART not implemented")
-        } else if let Some(_) = take_remaining("SIDE:", line) {
+        } else if let Some(_) = line.strip_prefix("SIDE:") {
             eprintln!("Warning: SIDE not implemented")
-        } else if let Some(_) = take_remaining("SCOREMODE:", line) {
+        } else if let Some(_) = line.strip_prefix("SCOREMODE:") {
             eprintln!("Warning: SCOREMODE not implemented")
-        } else if let Some(_) = take_remaining("TOTAL:", line) {
+        } else if let Some(_) = line.strip_prefix("TOTAL:") {
             eprintln!("Warning: TOTAL not implemented")
         } else {
             let mut split = line.split(':');
@@ -836,20 +837,12 @@ where
     None
 }
 
-fn take_remaining<'a>(key: &'static str, string: &'a str) -> Option<&'a str> {
-    if string.starts_with(key) {
-        Some(&string[key.len()..])
-    } else {
-        None
-    }
-}
-
 trait ParseFirst<V> {
-    fn parse_first(self: Self) -> Option<V>;
+    fn parse_first(self) -> Option<V>;
 }
 
 impl ParseFirst<f64> for &str {
-    fn parse_first(self: Self) -> Option<f64> {
+    fn parse_first(self) -> Option<f64> {
         static PATTERN: Lazy<Regex> = Lazy::new(|| {
             Regex::new(
                 r"(?ix)

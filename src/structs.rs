@@ -39,6 +39,15 @@ pub mod typed {
         pub info: T::Note,
     }
 
+    // impl <T: AdditionalInfo> Note<T> {
+    //     fn cloned_with<U, F>(self, f: F) -> Note<U> where U: AdditionalInfo, F: FnOnce() -> U::Note {
+    //         Note {
+    //             scroll_speed: self.scroll_speed,
+    //             time: self.time,
+    //         }
+    //     }
+    // }
+
     #[derive(Clone, Debug)]
     pub enum NoteContent<T: AdditionalInfo> {
         Single(SingleNote<T>),
@@ -49,6 +58,27 @@ pub mod typed {
     pub struct SingleNote<T: AdditionalInfo> {
         pub kind: SingleNoteKind,
         pub info: T::SingleNote,
+    }
+
+    impl<T: AdditionalInfo> SingleNote<T> {
+        pub fn clone_with<U, F>(&self, info: F) -> SingleNote<U>
+        where
+            U: AdditionalInfo,
+            F: FnOnce() -> U::SingleNote,
+        {
+            SingleNote {
+                kind: self.kind,
+                info: info(),
+            }
+        }
+
+        pub fn clone_with_default<U>(&self) -> SingleNote<U>
+        where
+            U: AdditionalInfo,
+            U::SingleNote: Default,
+        {
+            self.clone_with(Default::default)
+        }
     }
 
     #[derive(Clone, Debug)]
@@ -70,11 +100,54 @@ pub mod typed {
         pub info: T::UnlimitedRenda,
     }
 
+    impl<T: AdditionalInfo> UnlimitedRenda<T> {
+        pub fn clone_with<U, F>(&self, info: F) -> UnlimitedRenda<U>
+        where
+            U: AdditionalInfo,
+            F: FnOnce() -> U::UnlimitedRenda,
+        {
+            UnlimitedRenda {
+                size: self.size,
+                info: info(),
+            }
+        }
+
+        pub fn clone_with_default<U>(&self) -> UnlimitedRenda<U>
+        where
+            U: AdditionalInfo,
+            U::UnlimitedRenda: Default,
+        {
+            self.clone_with(Default::default)
+        }
+    }
+
     #[derive(Clone, Copy, Debug)]
     pub struct QuotaRenda<T: AdditionalInfo> {
         pub kind: QuotaRendaKind,
         pub quota: u64,
         pub info: T::QuotaRenda,
+    }
+
+    impl<T: AdditionalInfo> QuotaRenda<T> {
+        pub fn clone_with<U, F>(&self, info: F) -> QuotaRenda<U>
+        where
+            U: AdditionalInfo,
+            F: FnOnce() -> U::QuotaRenda,
+        {
+            QuotaRenda {
+                kind: self.kind,
+                quota: self.quota,
+                info: info(),
+            }
+        }
+
+        pub fn clone_with_default<U>(&self) -> QuotaRenda<U>
+        where
+            U: AdditionalInfo,
+            U::QuotaRenda: Default,
+        {
+            self.clone_with(Default::default)
+        }
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -191,6 +264,39 @@ pub enum BranchType {
 impl Default for BranchType {
     fn default() -> Self {
         Self::Normal
+    }
+}
+
+// TODO use (or create?) some derive macro
+impl BranchType {
+    pub fn next(self) -> Option<Self> {
+        use BranchType::*;
+        match self {
+            Normal => Some(Expert),
+            Expert => Some(Master),
+            Master => None,
+        }
+    }
+
+    pub fn prev(self) -> Option<Self> {
+        use BranchType::*;
+        match self {
+            Normal => None,
+            Expert => Some(Normal),
+            Master => Some(Expert),
+        }
+    }
+
+    pub fn saturating_next(self) -> Self {
+        self.next().unwrap_or(Self::Master)
+    }
+
+    pub fn saturating_prev(self) -> Self {
+        self.prev().unwrap_or(Self::Normal)
+    }
+
+    pub fn matches(self, other: Option<Self>) -> bool {
+        other.map_or(true, |x| x == self)
     }
 }
 
