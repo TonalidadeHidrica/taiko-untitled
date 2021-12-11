@@ -252,6 +252,19 @@ fn stream_thread<T: Send + 'static>(
     playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
 ) -> Result<(StreamConfig, Stream), TaikoError> {
     let host = cpal::default_host();
+    if let Ok(devices) = host.devices() {
+        for device in devices {
+            println!("Name: {:?}", device.name());
+            println!("  Default config:");
+            println!("    {:?}", device.default_output_config());
+            println!("  List of supported configs:");
+            if let Ok(configs) = device.supported_output_configs() {
+                for config in configs {
+                    println!("  - {:?}", config);
+                }
+            }
+        }
+    }
     let device = host.default_output_device().ok_or_else(|| TaikoError {
         message: "No default audio output device is available".to_string(),
         cause: TaikoErrorCause::None,
