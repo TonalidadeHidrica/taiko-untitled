@@ -1,6 +1,5 @@
 use config::Config;
 use ffmpeg4::codec::decoder;
-use ffmpeg4::format::context;
 use ffmpeg4::format::context::input::PacketIter;
 use ffmpeg4::sys::{av_seek_frame, AVSEEK_FLAG_BACKWARD};
 use ffmpeg4::util::{frame, media};
@@ -31,20 +30,20 @@ where
     }
 }
 
-struct VideoReader<'a> {
-    // input_context: &'a context::Input,
-    frame: frame::Video,
-    packet_iterator: FilteredPacketIter<'a>,
-    decoder: decoder::Video,
-    stream_index: usize,
-    time_base: Rational,
-}
+// struct VideoReader<'a> {
+//     // input_context: &'a context::Input,
+//     frame: frame::Video,
+//     packet_iterator: FilteredPacketIter<'a>,
+//     decoder: decoder::Video,
+//     stream_index: usize,
+//     time_base: Rational,
+// }
 
 struct FilteredPacketIter<'a>(PacketIter<'a>, usize);
 impl<'a> Iterator for FilteredPacketIter<'a> {
     type Item = Packet;
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((stream, packet)) = self.0.next() {
+        for (stream, packet) in &mut self.0 {
             if stream.index() == self.1 {
                 return Some(packet);
             }
@@ -53,62 +52,62 @@ impl<'a> Iterator for FilteredPacketIter<'a> {
     }
 }
 
-impl<'a> VideoReader<'a> {
-    fn new(input_context: &'a mut context::Input) -> Result<VideoReader<'a>, MainErr> {
-        let stream = input_context
-            .streams()
-            .best(media::Type::Video)
-            .ok_or("No video stream found")?;
-        let stream_index = stream.index();
-
-        let time_base = stream.time_base();
-
-        let mut decoder = stream.codec().decoder().video()?;
-        decoder.set_parameters(stream.parameters())?;
-
-        let packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
-
-        Ok(VideoReader {
-            // input_context,
-            decoder,
-            frame: frame::Video::empty(),
-            packet_iterator,
-            time_base,
-            stream_index,
-        })
-    }
-
-    fn next_frame(&mut self) -> Result<Option<&frame::Video>, MainErr> {
-        if let Some(packet) = self.packet_iterator.next() {
-            if self.decoder.decode(&packet, &mut self.frame)? {
-                return Ok(Some(&self.frame));
-            }
-        }
-        Ok(None)
-    }
-
-    fn seek(
-        stream_index: usize,
-        time_base: Rational,
-        input_context: &'a mut context::Input,
-        time: i32,
-    ) -> Result<VideoReader<'a>, MainErr> {
-        let timestamp = Rational::new(time, 1) / time_base;
-        let timestamp = f64::from(timestamp).trunc() as _;
-        unsafe {
-            if av_seek_frame(
-                input_context.as_mut_ptr(),
-                stream_index as _,
-                timestamp,
-                AVSEEK_FLAG_BACKWARD,
-            ) < 0
-            {
-                return Err(MainErr(String::from("Failed to seek")));
-            }
-        }
-        VideoReader::new(input_context)
-    }
-}
+// impl<'a> VideoReader<'a> {
+//     fn new(input_context: &'a mut context::Input) -> Result<VideoReader<'a>, MainErr> {
+//         let stream = input_context
+//             .streams()
+//             .best(media::Type::Video)
+//             .ok_or("No video stream found")?;
+//         let stream_index = stream.index();
+//
+//         let time_base = stream.time_base();
+//
+//         let mut decoder = stream.codec().decoder().video()?;
+//         decoder.set_parameters(stream.parameters())?;
+//
+//         let packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
+//
+//         Ok(VideoReader {
+//             // input_context,
+//             decoder,
+//             frame: frame::Video::empty(),
+//             packet_iterator,
+//             time_base,
+//             stream_index,
+//         })
+//     }
+//
+//     fn next_frame(&mut self) -> Result<Option<&frame::Video>, MainErr> {
+//         if let Some(packet) = self.packet_iterator.next() {
+//             if self.decoder.decode(&packet, &mut self.frame)? {
+//                 return Ok(Some(&self.frame));
+//             }
+//         }
+//         Ok(None)
+//     }
+//
+//     fn seek(
+//         stream_index: usize,
+//         time_base: Rational,
+//         input_context: &'a mut context::Input,
+//         time: i32,
+//     ) -> Result<VideoReader<'a>, MainErr> {
+//         let timestamp = Rational::new(time, 1) / time_base;
+//         let timestamp = f64::from(timestamp).trunc() as _;
+//         unsafe {
+//             if av_seek_frame(
+//                 input_context.as_mut_ptr(),
+//                 stream_index as _,
+//                 timestamp,
+//                 AVSEEK_FLAG_BACKWARD,
+//             ) < 0
+//             {
+//                 return Err(MainErr(String::from("Failed to seek")));
+//             }
+//         }
+//         VideoReader::new(input_context)
+//     }
+// }
 
 fn main() -> Result<(), MainErr> {
     let mut config = Config::default();
@@ -183,7 +182,7 @@ fn main() -> Result<(), MainErr> {
     let mut speed_up = false;
     let mut cursor_mode = true;
     let (mut note_x, mut note_y) = (500, 288);
-    let mut frame_id = -1;
+    let frame_id = -1; // TODO: remove this variable
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
     let mut draw_gauge = false;
 
@@ -268,7 +267,7 @@ fn main() -> Result<(), MainErr> {
                     }
                     Keycode::Period => {
                         if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
-                            update_frame_to_texture(&frame, &mut video_texture);
+                            update_frame_to_texture(&frame, &mut video_texture)?;
                             if let Some(t) = frame.pts() {
                                 pts = t;
                             }
