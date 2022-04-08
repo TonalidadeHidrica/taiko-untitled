@@ -211,7 +211,7 @@ fn main() -> Result<(), MainErr> {
                     Keycode::W => texture_width += 1,
                     Keycode::Num1 if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => {
                         let time = 30_000; // 30 seconds
-                        let timestamp = Rational::new(time, 1) / time_base;
+                        let timestamp = Rational::new(time, 1000) / time_base;
                         let timestamp = f64::from(timestamp).trunc() as _;
                         let res = unsafe {
                             av_seek_frame(
@@ -225,7 +225,13 @@ fn main() -> Result<(), MainErr> {
                             return Err(MainErr(String::from("Failed to seek")));
                         }
                         packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
-                        // TODO initialize other variables based on VideoReader::new
+                        decoder.flush();
+                        if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
+                            update_frame_to_texture(&frame, &mut video_texture)?;
+                            if let Some(t) = frame.pts() {
+                                pts = t;
+                            }
+                        }
                     }
                     Keycode::L => {
                         config.refresh()?;
