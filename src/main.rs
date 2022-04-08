@@ -2,7 +2,7 @@ use config::Config;
 use ffmpeg4::codec::decoder;
 use ffmpeg4::format::context;
 use ffmpeg4::util::{frame, media};
-use ffmpeg4::{format, Packet};
+use ffmpeg4::{format, Packet, Rational};
 use itertools::Itertools;
 use sdl2::event::Event;
 use sdl2::image::LoadTexture;
@@ -34,6 +34,8 @@ struct VideoReader<'a> {
     frame: frame::Video,
     packet_iterator: Box<dyn Iterator<Item = Packet> + 'a>,
     decoder: decoder::Video,
+
+    time_base: Rational,
 }
 
 impl<'a> VideoReader<'a> {
@@ -43,6 +45,8 @@ impl<'a> VideoReader<'a> {
             .best(media::Type::Video)
             .ok_or("No video stream found")?;
         let stream_index = stream.index();
+
+        let time_base = stream.time_base();
 
         let mut decoder = stream.codec().decoder().video()?;
         decoder.set_parameters(stream.parameters())?;
@@ -57,6 +61,7 @@ impl<'a> VideoReader<'a> {
             decoder,
             frame: frame::Video::empty(),
             packet_iterator: Box::new(packet_iterator),
+            time_base,
         })
     }
 
@@ -138,6 +143,8 @@ fn main() -> Result<(), MainErr> {
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
     let mut draw_gauge = false;
 
+    let mut pts = 0;
+
     let start = Instant::now();
 
     'main: loop {
@@ -198,11 +205,13 @@ fn main() -> Result<(), MainErr> {
                         }
                     }
                     Keycode::Period => {
-                        update_next_frame_to_texture(
+                        if let Some(t) = update_next_frame_to_texture(
                             &mut video_texture,
                             &mut video_reader,
                             &mut frame_id,
-                        )?;
+                        )? {
+                            pts = t;
+                        }
                     }
                     _ => {}
                 },
@@ -233,14 +242,14 @@ fn main() -> Result<(), MainErr> {
                     video_reader.next_frame()?;
                 }
             }
-            update_next_frame_to_texture(&mut video_texture, &mut video_reader, &mut frame_id)?;
+            if let Some(t) =
+                update_next_frame_to_texture(&mut video_texture, &mut video_reader, &mut frame_id)?
+            {
+                pts = t;
+            }
         }
 
-        canvas.copy(
-            &video_texture,
-            None,
-            affine(0, 0, width, height),
-        )?;
+        canvas.copy(&video_texture, None, affine(0, 0, width, height))?;
 
         if cursor_mode {
             canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
@@ -266,11 +275,7 @@ fn main() -> Result<(), MainErr> {
         } else {
             canvas.set_clip_rect(Some(Rect::new(focus_x, focus_y, width, height)));
             if let Some(ref image_texture) = image_texture {
-                canvas.copy(
-                    image_texture,
-                    None,
-                    affine(0, 0, width, height),
-                )?;
+                canvas.copy(image_texture, None, affine(0, 0, width, height))?;
             }
             if let Some(ref notes_texture) = notes_texture {
                 let dim = notes_texture.query();
@@ -285,11 +290,7 @@ fn main() -> Result<(), MainErr> {
                 // let gauge = game_manager.map_or(0.0, |g| g.game_state.gauge);
                 let clear_count = 39;
                 let all_count = 50;
-                canvas.copy(
-                    &textures.gauge_left_base,
-                    None,
-                    affine(726, 204, 1920, 78),
-                )?;
+                canvas.copy(&textures.gauge_left_base, None, affine(726, 204, 1920, 78))?;
                 canvas.copy(
                     &textures.gauge_right_base,
                     None,
@@ -314,6 +315,14 @@ fn main() -> Result<(), MainErr> {
 
         let infos = [
             format!("({}, {})", focus_x, focus_y),
+            {
+                let t = Rational::new(pts as i32, 1) * video_reader.time_base;
+                let ms = 1000 * t.0 as u64 / t.1 as u64;
+                let min = ms / 1000 / 60;
+                let sec = ms / 1000 % 60;
+                let ms = ms % 1000;
+                format!("{:02}:{:02}.{:03}", min, sec, ms)
+            },
             // format!("YUV = {:?}",
             //     current_frame.and_then(|frame|
             //         (0..3).map(|i|
@@ -327,11 +336,11 @@ fn main() -> Result<(), MainErr> {
             let text_width = text_surface.width();
             let text_height = text_surface.height();
             let text_texture = texture_creator.create_texture_from_surface(text_surface)?;
-            canvas.copy(
-                &text_texture,
-                None,
-                Some(Rect::new(0, 0, text_width, text_height)),
-            )?;
+            // canvas.copy(
+            //     &text_texture,
+            //     None,
+            //     Some(Rect::new(0, 0, text_width, text_height)),
+            // )?;
             canvas.copy(
                 &text_texture,
                 None,
@@ -357,7 +366,7 @@ fn update_next_frame_to_texture(
     video_texture: &mut Texture,
     video_reader: &mut VideoReader,
     frame_id: &mut i32,
-) -> Result<(), MainErr> {
+) -> Result<Option<i64>, MainErr> {
     if let Some(frame) = video_reader.next_frame()? {
         let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
         assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
@@ -371,6 +380,8 @@ fn update_next_frame_to_texture(
             frame.stride(2),
         )?;
         *frame_id += 1;
+        Ok(frame.pts())
+    } else {
+        Ok(None)
     }
-    Ok(())
 }

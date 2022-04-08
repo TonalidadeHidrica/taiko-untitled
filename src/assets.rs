@@ -1,8 +1,8 @@
 use sdl2::image::LoadTexture;
 use sdl2::render::{Texture, TextureCreator, TextureQuery};
 use sdl2::video::WindowContext;
-use std::path::Path;
 use std::fmt::Debug;
+use std::path::Path;
 
 pub struct Textures<'a> {
     pub background: Texture<'a>,
@@ -29,10 +29,8 @@ pub struct Textures<'a> {
     pub gauge_right_yellow: Texture<'a>,
 }
 
-impl <'a> Textures<'a> {
-    pub fn new(
-        texture_creator: &'a TextureCreator<WindowContext>,
-    ) -> Result<Textures<'a>, String> {
+impl<'a> Textures<'a> {
+    pub fn new(texture_creator: &'a TextureCreator<WindowContext>) -> Result<Textures<'a>, String> {
         let assets_dir = Path::new("assets");
 
         let img_dir = assets_dir.join("img");
@@ -146,7 +144,7 @@ fn load_texture_and_check_size<P: AsRef<Path> + Debug + Clone>(
 
 fn load_combo_textures<'a, F>(to_texture: F) -> Result<Vec<Texture<'a>>, String>
 where
-    F: Fn(usize) -> Result<Texture<'a>, String>
+    F: Fn(usize) -> Result<Texture<'a>, String>,
 {
     (0..10)
         .map(to_texture)
