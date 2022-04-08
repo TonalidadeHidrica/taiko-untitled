@@ -1,6 +1,7 @@
 use config::Config;
 use ffmpeg4::codec::decoder;
 use ffmpeg4::format::context;
+use ffmpeg4::format::context::input::PacketIter;
 use ffmpeg4::sys::{av_seek_frame, AVSEEK_FLAG_BACKWARD};
 use ffmpeg4::util::{frame, media};
 use ffmpeg4::{format, Packet, Rational};
@@ -33,10 +34,23 @@ where
 struct VideoReader<'a> {
     // input_context: &'a context::Input,
     frame: frame::Video,
-    packet_iterator: Box<dyn Iterator<Item = Packet> + 'a>,
+    packet_iterator: FilteredPacketIter<'a>,
     decoder: decoder::Video,
     stream_index: usize,
     time_base: Rational,
+}
+
+struct FilteredPacketIter<'a>(PacketIter<'a>, i32);
+impl<'a> Iterator for FilteredPacketIter<'a> {
+    type Item = Packet;
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((stream, packet)) = self.0.next() {
+            if stream.id() == self.1 {
+                return Some(packet);
+            }
+        }
+        None
+    }
 }
 
 impl<'a> VideoReader<'a> {
@@ -52,16 +66,13 @@ impl<'a> VideoReader<'a> {
         let mut decoder = stream.codec().decoder().video()?;
         decoder.set_parameters(stream.parameters())?;
 
-        let packet_iterator = input_context
-            .packets()
-            .filter(move |(x, _)| x.index() == stream_index)
-            .map(|p| p.1);
+        let packet_iterator = FilteredPacketIter(input_context.packets(), stream_index as i32);
 
         Ok(VideoReader {
             // input_context,
             decoder,
             frame: frame::Video::empty(),
-            packet_iterator: Box::new(packet_iterator),
+            packet_iterator,
             time_base,
             stream_index,
         })
@@ -194,8 +205,9 @@ fn main() -> Result<(), MainErr> {
                         let time_base = video_reader.time_base;
                         let stream_index = video_reader.stream_index;
                         // Seeking to 0:30.000
-                        video_reader =
-                            VideoReader::seek(stream_index, time_base, &mut input_context, 30_000)?;
+                        // video_reader =
+                        //     VideoReader::seek(stream_index, time_base, &mut input_context, 30_000)?;
+                        video_reader = VideoReader::new(&mut input_context)?;
                     }
                     Keycode::L => {
                         config.refresh()?;
