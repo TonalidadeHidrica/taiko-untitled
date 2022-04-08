@@ -1,6 +1,7 @@
 use config::Config;
 use ffmpeg4::codec::decoder;
 use ffmpeg4::format::context;
+use ffmpeg4::sys::{av_seek_frame, AVSEEK_FLAG_BACKWARD};
 use ffmpeg4::util::{frame, media};
 use ffmpeg4::{format, Packet, Rational};
 use itertools::Itertools;
@@ -34,7 +35,7 @@ struct VideoReader<'a> {
     frame: frame::Video,
     packet_iterator: Box<dyn Iterator<Item = Packet> + 'a>,
     decoder: decoder::Video,
-
+    stream_index: usize,
     time_base: Rational,
 }
 
@@ -62,6 +63,7 @@ impl<'a> VideoReader<'a> {
             frame: frame::Video::empty(),
             packet_iterator: Box::new(packet_iterator),
             time_base,
+            stream_index,
         })
     }
 
@@ -72,6 +74,28 @@ impl<'a> VideoReader<'a> {
             }
         }
         Ok(None)
+    }
+
+    fn seek(
+        stream_index: usize,
+        time_base: Rational,
+        input_context: &'a mut context::Input,
+        time: i32,
+    ) -> Result<VideoReader<'a>, MainErr> {
+        let timestamp = Rational::new(time, 1) / time_base;
+        let timestamp = f64::from(timestamp).trunc() as _;
+        unsafe {
+            if av_seek_frame(
+                input_context.as_mut_ptr(),
+                stream_index as _,
+                timestamp,
+                AVSEEK_FLAG_BACKWARD,
+            ) < 0
+            {
+                return Err(MainErr(String::from("Failed to seek")));
+            }
+        }
+        VideoReader::new(input_context)
     }
 }
 
@@ -166,6 +190,13 @@ fn main() -> Result<(), MainErr> {
                     Keycode::G => draw_gauge = !draw_gauge,
                     Keycode::Q => texture_width = max(1, texture_width - 1),
                     Keycode::W => texture_width += 1,
+                    Keycode::Num1 if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => {
+                        let time_base = video_reader.time_base;
+                        let stream_index = video_reader.stream_index;
+                        // Seeking to 0:30.000
+                        video_reader =
+                            VideoReader::seek(stream_index, time_base, &mut input_context, 30_000)?;
+                    }
                     Keycode::L => {
                         config.refresh()?;
                         let notes_path = config.get_str("notes_image").ok();
