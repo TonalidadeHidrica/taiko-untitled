@@ -40,12 +40,12 @@ struct VideoReader<'a> {
     time_base: Rational,
 }
 
-struct FilteredPacketIter<'a>(PacketIter<'a>, i32);
+struct FilteredPacketIter<'a>(PacketIter<'a>, usize);
 impl<'a> Iterator for FilteredPacketIter<'a> {
     type Item = Packet;
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((stream, packet)) = self.0.next() {
-            if stream.id() == self.1 {
+            if stream.index() == self.1 {
                 return Some(packet);
             }
         }
@@ -66,7 +66,7 @@ impl<'a> VideoReader<'a> {
         let mut decoder = stream.codec().decoder().video()?;
         decoder.set_parameters(stream.parameters())?;
 
-        let packet_iterator = FilteredPacketIter(input_context.packets(), stream_index as i32);
+        let packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
 
         Ok(VideoReader {
             // input_context,
@@ -164,7 +164,16 @@ fn main() -> Result<(), MainErr> {
     let font = ttf_context.load_font(font_path, 24)?;
 
     let mut input_context = format::input(&video_path)?;
-    let mut video_reader = VideoReader::new(&mut input_context)?;
+    let stream = input_context
+        .streams()
+        .best(media::Type::Video)
+        .ok_or("No video stream found")?;
+    let stream_index = stream.index();
+    let time_base = stream.time_base();
+    let mut decoder = stream.codec().decoder().video()?;
+    decoder.set_parameters(stream.parameters())?;
+    let mut packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
+    let mut frame = frame::Video::empty();
 
     let mut do_play = false;
     let mut zoom_proportion = 1;
@@ -202,12 +211,22 @@ fn main() -> Result<(), MainErr> {
                     Keycode::Q => texture_width = max(1, texture_width - 1),
                     Keycode::W => texture_width += 1,
                     Keycode::Num1 if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => {
-                        let time_base = video_reader.time_base;
-                        let stream_index = video_reader.stream_index;
-                        // Seeking to 0:30.000
-                        // video_reader =
-                        //     VideoReader::seek(stream_index, time_base, &mut input_context, 30_000)?;
-                        video_reader = VideoReader::new(&mut input_context)?;
+                        let time = 30_000; // 30 seconds
+                        let timestamp = Rational::new(time, 1) / time_base;
+                        let timestamp = f64::from(timestamp).trunc() as _;
+                        let res = unsafe {
+                            av_seek_frame(
+                                input_context.as_mut_ptr(),
+                                stream_index as _,
+                                timestamp,
+                                AVSEEK_FLAG_BACKWARD,
+                            )
+                        };
+                        if res < 0 {
+                            return Err(MainErr(String::from("Failed to seek")));
+                        }
+                        packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
+                        // TODO initialize other variables based on VideoReader::new
                     }
                     Keycode::L => {
                         config.refresh()?;
@@ -248,12 +267,11 @@ fn main() -> Result<(), MainErr> {
                         }
                     }
                     Keycode::Period => {
-                        if let Some(t) = update_next_frame_to_texture(
-                            &mut video_texture,
-                            &mut video_reader,
-                            &mut frame_id,
-                        )? {
-                            pts = t;
+                        if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
+                            update_frame_to_texture(&frame, &mut video_texture);
+                            if let Some(t) = frame.pts() {
+                                pts = t;
+                            }
                         }
                     }
                     _ => {}
@@ -282,13 +300,16 @@ fn main() -> Result<(), MainErr> {
         if do_play {
             if speed_up {
                 for _ in 0..5 {
-                    video_reader.next_frame()?;
+                    // TODO: do we really have to decode the frame?
+                    next_frame(&mut packet_iterator, &mut decoder, &mut frame)?;
                 }
             }
-            if let Some(t) =
-                update_next_frame_to_texture(&mut video_texture, &mut video_reader, &mut frame_id)?
-            {
-                pts = t;
+            // TODO: duplicate
+            if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
+                update_frame_to_texture(&frame, &mut video_texture)?;
+                if let Some(t) = frame.pts() {
+                    pts = t;
+                }
             }
         }
 
@@ -359,7 +380,7 @@ fn main() -> Result<(), MainErr> {
         let infos = [
             format!("({}, {})", focus_x, focus_y),
             {
-                let t = Rational::new(pts as i32, 1) * video_reader.time_base;
+                let t = Rational::new(pts as i32, 1) * time_base;
                 let ms = 1000 * t.0 as u64 / t.1 as u64;
                 let min = ms / 1000 / 60;
                 let sec = ms / 1000 % 60;
@@ -405,26 +426,33 @@ fn main() -> Result<(), MainErr> {
     Ok(())
 }
 
-fn update_next_frame_to_texture(
-    video_texture: &mut Texture,
-    video_reader: &mut VideoReader,
-    frame_id: &mut i32,
-) -> Result<Option<i64>, MainErr> {
-    if let Some(frame) = video_reader.next_frame()? {
-        let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
-        assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
-        video_texture.update_yuv(
-            None,
-            frame.data(0),
-            frame.stride(0),
-            frame.data(1),
-            frame.stride(1),
-            frame.data(2),
-            frame.stride(2),
-        )?;
-        *frame_id += 1;
-        Ok(frame.pts())
-    } else {
-        Ok(None)
+fn next_frame(
+    packet_iterator: &mut FilteredPacketIter,
+    decoder: &mut decoder::Video,
+    frame: &mut frame::Video,
+) -> Result<bool, MainErr> {
+    if let Some(packet) = packet_iterator.next() {
+        if decoder.decode(&packet, frame)? {
+            return Ok(true);
+        }
     }
+    Ok(false)
+}
+
+fn update_frame_to_texture(
+    frame: &frame::Video,
+    video_texture: &mut Texture,
+) -> Result<(), MainErr> {
+    let (_, format) = get_sdl_pix_fmt_and_blendmode(frame.format());
+    assert!(format == PixelFormatEnum::IYUV && frame.stride(0) > 0);
+    video_texture.update_yuv(
+        None,
+        frame.data(0),
+        frame.stride(0),
+        frame.data(1),
+        frame.stride(1),
+        frame.data(2),
+        frame.stride(2),
+    )?;
+    Ok(())
 }
