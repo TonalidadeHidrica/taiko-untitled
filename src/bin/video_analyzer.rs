@@ -203,6 +203,7 @@ fn main() -> Result<(), MainErr> {
     let mut focus_x = 0;
     let mut focus_y = 0;
     let mut fixed = false;
+    #[allow(unused_mut)] // Removed feature
     let mut speed_up = false;
     let mut cursor_mode = true;
     let (mut note_x, mut note_y) = (500, 288);
@@ -229,35 +230,11 @@ fn main() -> Result<(), MainErr> {
                     Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
                     Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
                     Keycode::F => fixed = !fixed,
-                    Keycode::S => speed_up = !speed_up,
+                    // Keycode::S => speed_up = !speed_up,
                     Keycode::C => cursor_mode = !cursor_mode,
                     Keycode::G => draw_gauge = !draw_gauge,
                     Keycode::Q => texture_width = max(1, texture_width - 1),
                     Keycode::W => texture_width += 1,
-                    Keycode::Num1 if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => {
-                        let time = 30_000; // 30 seconds
-                        let timestamp = Rational::new(time, 1000) / time_base;
-                        let timestamp = f64::from(timestamp).trunc() as _;
-                        let res = unsafe {
-                            av_seek_frame(
-                                input_context.as_mut_ptr(),
-                                stream_index as _,
-                                timestamp,
-                                AVSEEK_FLAG_BACKWARD,
-                            )
-                        };
-                        if res < 0 {
-                            return Err(MainErr(String::from("Failed to seek")));
-                        }
-                        packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
-                        decoder.flush();
-                        if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
-                            update_frame_to_texture(&frame, &mut video_texture)?;
-                            if let Some(t) = frame.pts() {
-                                pts = t;
-                            }
-                        }
-                    }
                     Keycode::L => {
                         config.refresh()?;
                         let notes_path = config.get_str("notes_image").ok();
@@ -313,6 +290,33 @@ fn main() -> Result<(), MainErr> {
                             _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 0.01,
                             _ => 0.0001,
                         };
+                    }
+                    Keycode::PageDown => {
+                        packet_iterator = seek(
+                            SeekTarget::Timestamp(pts.saturating_sub(1)),
+                            time_base,
+                            &mut input_context,
+                            stream_index,
+                            &mut decoder,
+                            &mut frame,
+                            &mut video_texture,
+                            &mut pts,
+                        )?;
+                    }
+                    Keycode::PageUp => {
+                        let timestamp_delta = Rational::new(10, 1) / time_base;
+                        let target_timestamp =
+                            pts + (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
+                        packet_iterator = seek(
+                            SeekTarget::Timestamp(target_timestamp),
+                            time_base,
+                            &mut input_context,
+                            stream_index,
+                            &mut decoder,
+                            &mut frame,
+                            &mut video_texture,
+                            &mut pts,
+                        )?;
                     }
                     _ => {}
                 },
@@ -481,12 +485,60 @@ fn main() -> Result<(), MainErr> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug)]
+enum SeekTarget {
+    Timestamp(i64),
+    #[allow(unused)]
+    Milliseconds(i32),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn seek<'a>(
+    seek_target: SeekTarget,
+    time_base: Rational,
+    input_context: &'a mut format::context::Input,
+    stream_index: usize,
+    decoder: &mut decoder::Video,
+    frame: &mut frame::Video,
+    video_texture: &mut Texture,
+    pts: &mut i64,
+) -> Result<FilteredPacketIter<'a>, MainErr> {
+    let timestamp = match seek_target {
+        SeekTarget::Milliseconds(time_ms) => {
+            let timestamp = Rational::new(time_ms, 1000) / time_base;
+            f64::from(timestamp).trunc() as _
+        }
+        SeekTarget::Timestamp(t) => t,
+    };
+    let res = unsafe {
+        av_seek_frame(
+            input_context.as_mut_ptr(),
+            stream_index as _,
+            timestamp,
+            AVSEEK_FLAG_BACKWARD,
+        )
+    };
+    if res < 0 {
+        return Err(MainErr(String::from("Failed to seek")));
+    }
+    let mut packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
+    decoder.flush();
+    if next_frame(&mut packet_iterator, decoder, frame)? {
+        update_frame_to_texture(&*frame, video_texture)?;
+        if let Some(t) = frame.pts() {
+            *pts = t;
+        }
+    }
+    Ok(packet_iterator)
+}
+
 fn next_frame(
     packet_iterator: &mut FilteredPacketIter,
     decoder: &mut decoder::Video,
     frame: &mut frame::Video,
 ) -> Result<bool, MainErr> {
-    if let Some(packet) = packet_iterator.next() {
+    // We assume that a frame is always decoded.
+    for packet in packet_iterator.by_ref() {
         if decoder.decode(&packet, frame)? {
             return Ok(true);
         }
