@@ -379,6 +379,7 @@ impl<T> AudioThreadState<T> {
         }
     }
 
+    #[allow(unstable_name_collisions)]
     fn data_callback<S>(mut self) -> impl FnMut(&mut [S], &cpal::OutputCallbackInfo)
     where
         S: rodio::Sample,

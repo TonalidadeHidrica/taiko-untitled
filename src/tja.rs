@@ -69,7 +69,9 @@ impl Default for Song {
 
 #[derive(Debug)]
 pub struct Subtitle {
+    #[allow(unused)]
     text: String,
+    #[allow(unused)]
     style: SubtitleStyle,
 }
 
@@ -616,7 +618,7 @@ impl ScoreParser<'_> {
                     end_state: self.parser_state.clone(),
                     shared_elements: context.shared_elements,
                     measure_index: 0,
-                    filled_branch: EnumMap::new(),
+                    filled_branch: EnumMap::default(),
                 };
                 self.branch_switch_subseqent(branch_type, context)
             }
