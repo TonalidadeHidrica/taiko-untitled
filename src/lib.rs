@@ -1,5 +1,5 @@
-pub mod video_analyzer_assets;
 pub mod ffmpeg_utils;
+pub mod video_analyzer_assets;
 
 #[macro_use]
 pub mod structs;

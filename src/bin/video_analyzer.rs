@@ -15,8 +15,13 @@ use std::cmp::max;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::time::Instant;
-use taiko_untitled::video_analyzer_assets::Textures;
+use taiko_untitled::assets::Assets;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
+use taiko_untitled::game::draw_game_notes;
+use taiko_untitled::game_graphics::game_rect;
+use taiko_untitled::game_manager::GameManager;
+use taiko_untitled::tja::load_tja_from_file;
+use taiko_untitled::video_analyzer_assets::Textures;
 
 #[derive(Debug)]
 struct MainErr(String);
@@ -28,6 +33,9 @@ where
     fn from(err: T) -> Self {
         MainErr(err.to_string())
     }
+}
+fn debug_to_err<T: std::fmt::Debug>() -> impl Fn(T) -> MainErr {
+    |e| MainErr(format!("{:?}", e))
 }
 
 // struct VideoReader<'a> {
@@ -131,6 +139,19 @@ fn main() -> Result<(), MainErr> {
                 _ => None,
             });
 
+    let score = config
+        .get::<PathBuf>("score")
+        .ok()
+        .map(|f| load_tja_from_file(&f))
+        .transpose()
+        .map_err(|e| MainErr(format!("{:?}", e)))?
+        .map(|song| {
+            song.score
+                .ok_or_else(|| MainErr("Score not found in the tja file".into()))
+        })
+        .transpose()?
+        .map(|score| GameManager::new(&score).score);
+
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
     let window = video_subsystem
@@ -162,6 +183,9 @@ fn main() -> Result<(), MainErr> {
     let mut textures = Textures::new(&texture_creator)?;
     let font = ttf_context.load_font(font_path, 24)?;
 
+    let audio_manager = taiko_untitled::audio::AudioManager::new().map_err(debug_to_err())?;
+    let game_assets = Assets::new(&texture_creator, &audio_manager).map_err(debug_to_err())?;
+
     let mut input_context = format::input(&video_path)?;
     let stream = input_context
         .streams()
@@ -185,6 +209,7 @@ fn main() -> Result<(), MainErr> {
     let frame_id = -1; // TODO: remove this variable
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
     let mut draw_gauge = false;
+    let mut score_time_delta = config.get_float("score_time_delta").unwrap_or(0.0);
 
     let mut pts = 0;
 
@@ -278,6 +303,16 @@ fn main() -> Result<(), MainErr> {
                                 pts = t;
                             }
                         }
+                    }
+                    Keycode::J | Keycode::K => {
+                        score_time_delta += match keycode {
+                            Keycode::J => -1.,
+                            _ => 1.,
+                        } * match () {
+                            _ if keymod.intersects(Mod::LALTMOD | Mod::RALTMOD) => 1.,
+                            _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 0.01,
+                            _ => 0.0001,
+                        };
                     }
                     _ => {}
                 },
@@ -382,6 +417,20 @@ fn main() -> Result<(), MainErr> {
             canvas.set_clip_rect(None);
         }
 
+        if let Some(score) = &score {
+            let rect = game_rect();
+            let (tx, ty) = (rect.x + rect.w as i32, rect.y + rect.h as i32);
+            let (sx, sy) = (focus_x.clamp(rect.x, tx), focus_y.clamp(rect.y, ty));
+            let rect = Rect::new(sx, sy, (tx - sx) as _, (ty - sy) as _);
+            canvas.set_clip_rect(rect);
+            canvas.set_draw_color((28, 28, 28));
+            canvas.fill_rect(rect)?;
+            let time = f64::from(Rational::new(pts as i32, 1) * time_base) + score_time_delta;
+            draw_game_notes(&mut canvas, &game_assets, time, score)
+                .map_err(|e| MainErr(format!("{:?}", e)))?;
+            canvas.set_clip_rect(None);
+        }
+
         let infos = [
             format!("({}, {})", focus_x, focus_y),
             {
@@ -392,6 +441,7 @@ fn main() -> Result<(), MainErr> {
                 let ms = ms % 1000;
                 format!("{:02}:{:02}.{:03}", min, sec, ms)
             },
+            format!("score_time_delta = {:.4}", score_time_delta),
             // format!("YUV = {:?}",
             //     current_frame.and_then(|frame|
             //         (0..3).map(|i|

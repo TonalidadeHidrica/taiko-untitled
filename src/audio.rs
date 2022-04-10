@@ -269,13 +269,10 @@ fn stream_thread<T: Send + 'static>(
         message: "No default audio output device is available".to_string(),
         cause: TaikoErrorCause::None,
     })?;
-    let supported_configs_range =
-        device.supported_output_configs().map_err(|e| TaikoError {
-            message: "Audio output device is no longer valid".to_string(),
-            cause: TaikoErrorCause::CpalOrRodioError(
-                CpalOrRodioError::SupportedStreamConfigsError(e),
-            ),
-        })?;
+    let supported_configs_range = device.supported_output_configs().map_err(|e| TaikoError {
+        message: "Audio output device is no longer valid".to_string(),
+        cause: TaikoErrorCause::CpalOrRodioError(CpalOrRodioError::SupportedStreamConfigsError(e)),
+    })?;
     let supported_config = supported_configs_range
         .max_by_key(|x| x.max_sample_rate())
         .ok_or_else(|| TaikoError {
