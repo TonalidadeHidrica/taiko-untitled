@@ -204,7 +204,7 @@ const OK_WINDOW: f64 = 75.0750045776367 / 1000.0;
 const BAD_WINDOW: f64 = 108.441665649414 / 1000.0;
 
 fn get_gauge_good_delta(score: &just::Score) -> f64 {
-    let mut counts = EnumMap::<_, usize>::new();
+    let mut counts = EnumMap::<_, usize>::default();
     for note in &score.notes {
         if let just::NoteContent::Single(..) = note.content {
             match note.branch {

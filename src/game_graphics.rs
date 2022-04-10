@@ -91,7 +91,7 @@ pub fn draw_bar_lines<'a, I>(
 where
     I: Iterator<Item = &'a BarLine>,
 {
-    let mut sorted_bar_lines = EnumMap::<_, Vec<_>>::new();
+    let mut sorted_bar_lines = EnumMap::<_, Vec<_>>::default();
     for bar_line in bar_lines {
         let x = get_x(music_position, bar_line.time, bar_line.scroll_speed) as i32;
         if (0..=2000).contains(&x) {
