@@ -7,12 +7,23 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+boolinator = "2.4.0"
 byteorder = "1.3.4"
+chardetng = "0.1.9"
 config = "0.10.1"
+cpal = "0.13.2"
+derive_more = "0.99.11"
+encoding_rs = "0.8.24"
+enum-map = "0.6.3"
 ffmpeg4 = { git = "https://github.com/TonalidadeHidrica/rust-ffmpeg4", branch = "fix-missing-variable" }
 itertools = "0.10.2"
+notify = "4.0.15"
+num = "0.4.0"
+once_cell = "1.5.2"
+ordered-float = "2.0.0"
+regex = "1.4.2"
+retain_mut = "0.1.1"
+rodio = { version = "0.13.0", path = "../rodio" }
 sdl2 = { version = "0.35.2", features = ["image", "ttf"] }
-
-# stainless_ffmpeg = "0.2.0"
-# stainless-ffmpeg-sys = "4.2.2-update.1"
-# ffmpeg-next = {git = "https://github.com/zmwangx/rust-ffmpeg"}
+serde = { version = "1.0.115", features = ["derive"] }
+universal-audio-decoder = { path = "../universal-audio-decoder/" }

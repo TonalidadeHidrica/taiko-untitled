@@ -15,7 +15,7 @@ use std::cmp::max;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::time::Instant;
-use taiko_untitled::assets::Textures;
+use taiko_untitled::video_analyzer_assets::Textures;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 
 #[derive(Debug)]

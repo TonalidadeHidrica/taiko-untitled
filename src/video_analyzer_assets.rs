@@ -1,16 +1,8 @@
-use crate::audio::{AudioManager, SoundBuffer};
-use crate::errors::{new_sdl_error, TaikoError, TaikoErrorCause};
-use crate::game::AutoEvent;
 use sdl2::image::LoadTexture;
 use sdl2::render::{Texture, TextureCreator, TextureQuery};
 use sdl2::video::WindowContext;
 use std::fmt::Debug;
 use std::path::Path;
-
-pub struct Assets<'a> {
-    pub textures: Textures<'a>,
-    pub chunks: Chunks,
-}
 
 pub struct Textures<'a> {
     pub background: Texture<'a>,
@@ -35,19 +27,10 @@ pub struct Textures<'a> {
     pub gauge_right_base: Texture<'a>,
     pub gauge_right_dark: Texture<'a>,
     pub gauge_right_yellow: Texture<'a>,
-    pub gauge_soul: Texture<'a>,
 }
 
-pub struct Chunks {
-    pub sound_don: SoundBuffer,
-    pub sound_ka: SoundBuffer,
-}
-
-impl<'a> Assets<'a> {
-    pub fn new<'b>(
-        texture_creator: &'a TextureCreator<WindowContext>,
-        audio_manager: &'b AudioManager<AutoEvent>, // TODO should be stream_config instead
-    ) -> Result<Assets<'a>, TaikoError> {
+impl<'a> Textures<'a> {
+    pub fn new(texture_creator: &'a TextureCreator<WindowContext>) -> Result<Textures<'a>, String> {
         let assets_dir = Path::new("assets");
 
         let img_dir = assets_dir.join("img");
@@ -140,54 +123,30 @@ impl<'a> Assets<'a> {
                 img_dir.join("gauge_right_yellow.png"),
                 (1044, 78),
             )?,
-            gauge_soul: load_texture_and_check_size(tc, img_dir.join("gauge_soul.png"), (71, 63))?,
         };
 
-        let snd_dir = assets_dir.join("snd");
-        let load_sound = |filename| {
-            SoundBuffer::load(
-                snd_dir.join(filename),
-                audio_manager.stream_config.channels,
-                audio_manager.stream_config.sample_rate,
-            )
-        };
-        let chunks = Chunks {
-            sound_don: load_sound("dong.ogg")?,
-            sound_ka: load_sound("ka.ogg")?,
-        };
-
-        Ok(Assets { textures, chunks })
+        Ok(textures)
     }
 }
 
-fn load_texture_and_check_size<P: AsRef<Path> + Debug>(
+fn load_texture_and_check_size<P: AsRef<Path> + Debug + Clone>(
     texture_creator: &TextureCreator<WindowContext>,
     path: P,
     required_dimensions: (u32, u32),
-) -> Result<Texture, TaikoError> {
-    let texture = texture_creator
-        .load_texture(&path)
-        .map_err(|s| new_sdl_error("Failed to load background texture", s))?;
-    let TextureQuery { width, height, .. } = texture.query();
-    if (width, height) == required_dimensions {
-        Ok(texture)
-    } else {
-        Err(TaikoError {
-            message: format!(
-                "Texture size of {:?} is invalid: expected {:?}, found ({}, {})",
-                &path, required_dimensions, width, height
-            ),
-            cause: TaikoErrorCause::InvalidResourceError,
-        })
+) -> Result<Texture, String> {
+    let texture = texture_creator.load_texture(path.clone())?;
+    match texture.query() {
+        TextureQuery { width, height, .. } if (width, height) == required_dimensions => {}
+        _ => return Err(format!("Texture size of {:?} is invalid", path)),
     }
+    Ok(texture)
 }
 
-fn load_combo_textures<'a, F>(to_texture: F) -> Result<Vec<Texture<'a>>, TaikoError>
+fn load_combo_textures<'a, F>(to_texture: F) -> Result<Vec<Texture<'a>>, String>
 where
     F: Fn(usize) -> Result<Texture<'a>, String>,
 {
     (0..10)
         .map(to_texture)
-        .collect::<Result<_, _>>()
-        .map_err(|s| new_sdl_error("Failed to load a texture", s))
+        .collect::<Result<Vec<Texture<'a>>, String>>()
 }
