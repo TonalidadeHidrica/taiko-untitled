@@ -380,5 +380,5 @@ fn interpolate_color(color_zero: Color, color_one: Color, t: f64) -> Color {
 
 fn get_x(music_position: f64, time: f64, scroll_speed: Bpm) -> f64 {
     let diff = time - music_position;
-    520.0 + 1422.0 / 4.0 * diff / scroll_speed.beat_duration()
+    522.5 + 1422.0 / 4.0 * diff / scroll_speed.beat_duration()
 }
