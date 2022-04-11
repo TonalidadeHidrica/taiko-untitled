@@ -203,9 +203,8 @@ fn main() -> Result<(), MainErr> {
     let mut focus_x = 0;
     let mut focus_y = 0;
     let mut fixed = false;
-    #[allow(unused_mut)] // Removed feature
     let mut speed_up = false;
-    let mut cursor_mode = true;
+    let mut cursor_mode = false;
     let (mut note_x, mut note_y) = (500, 288);
     let frame_id = -1; // TODO: remove this variable
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
@@ -230,7 +229,9 @@ fn main() -> Result<(), MainErr> {
                     Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
                     Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
                     Keycode::F => fixed = !fixed,
-                    // Keycode::S => speed_up = !speed_up,
+                    Keycode::S if keymod.intersects(Mod::LALTMOD | Mod::RALTMOD) => {
+                        speed_up = !speed_up
+                    }
                     Keycode::C => cursor_mode = !cursor_mode,
                     Keycode::G => draw_gauge = !draw_gauge,
                     Keycode::Q => texture_width = max(1, texture_width - 1),
