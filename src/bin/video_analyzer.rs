@@ -140,18 +140,23 @@ fn main() -> Result<(), MainErr> {
                 _ => None,
             });
 
-    let score = config
-        .get::<PathBuf>("score")
-        .ok()
-        .map(|f| load_tja_from_file(&f))
-        .transpose()
-        .map_err(|e| MainErr(format!("{:?}", e)))?
-        .map(|song| {
-            song.score
-                .ok_or_else(|| MainErr("Score not found in the tja file".into()))
-        })
-        .transpose()?
-        .map(|score| GameManager::new(&score).score);
+    let score_path = config.get::<PathBuf>("score");
+    let get_score = || -> Result<_, MainErr> {
+        Ok(score_path
+            .as_ref()
+            .ok()
+            .map(|f| load_tja_from_file(&f))
+            .transpose()
+            .map_err(|e| MainErr(format!("{:?}", e)))?
+            .map(|song| {
+                song.score
+                    .ok_or_else(|| MainErr("Score not found in the tja file".into()))
+            })
+            .transpose()?
+            .map(|score| GameManager::new(&score).score))
+    };
+
+    let mut score = get_score()?;
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -239,8 +244,8 @@ fn main() -> Result<(), MainErr> {
                         Keycode::S if alt => speed_up = !speed_up,
                         Keycode::C => cursor_mode = !cursor_mode,
                         Keycode::G => draw_gauge = !draw_gauge,
-                        Keycode::Q => texture_width = max(1, texture_width - 1),
-                        Keycode::W => texture_width += 1,
+                        Keycode::Q if alt => texture_width = max(1, texture_width - 1),
+                        Keycode::W if alt => texture_width += 1,
                         Keycode::L => {
                             config.refresh()?;
                             let notes_path = config.get_str("notes_image").ok();
@@ -365,6 +370,13 @@ fn main() -> Result<(), MainErr> {
                             let time = f64::from(Rational::new(pts as i32, 1) * time_base);
                             println!("{:.3} {}", time, note_x);
                         }
+                        Keycode::Q => match get_score() {
+                            Err(e) => println!("Failed loading the score: {:?}", e),
+                            Ok(None) => println!(
+                                "`score` is not specified or the tja file does not have a score"
+                            ),
+                            Ok(s) => score = s,
+                        },
                         _ => {}
                     }
                 }
