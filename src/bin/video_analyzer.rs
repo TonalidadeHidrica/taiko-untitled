@@ -210,6 +210,7 @@ fn main() -> Result<(), MainErr> {
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
     let mut draw_gauge = false;
     let mut score_time_delta = config.get_float("score_time_delta").unwrap_or(0.0);
+    let mut show_score = true;
 
     let mut pts = 0;
 
@@ -223,104 +224,109 @@ fn main() -> Result<(), MainErr> {
                     keycode: Some(keycode),
                     keymod,
                     ..
-                } => match keycode {
-                    Keycode::Space => do_play = !do_play,
-                    Keycode::Z => zoom_proportion += 1,
-                    Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
-                    Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
-                    Keycode::F => fixed = !fixed,
-                    Keycode::S if keymod.intersects(Mod::LALTMOD | Mod::RALTMOD) => {
-                        speed_up = !speed_up
-                    }
-                    Keycode::C => cursor_mode = !cursor_mode,
-                    Keycode::G => draw_gauge = !draw_gauge,
-                    Keycode::Q => texture_width = max(1, texture_width - 1),
-                    Keycode::W => texture_width += 1,
-                    Keycode::L => {
-                        config.refresh()?;
-                        let notes_path = config.get_str("notes_image").ok();
-                        image_texture = match image_path {
-                            Some(ref image_path) => Some(texture_creator.load_texture(image_path)?),
-                            _ => None,
-                        };
-                        notes_texture = match notes_path {
-                            Some(ref path) => {
-                                let t = texture_creator.load_texture(path)?;
-                                texture_width = t.query().width;
-                                Some(t)
-                            }
-                            _ => None,
-                        };
-                        textures = Textures::new(&texture_creator)?;
-                    }
-                    Keycode::P => {
-                        println!("{}\t{}\t{}\t{}", frame_id, note_x, note_y, texture_width);
-                    }
-                    Keycode::Left | Keycode::Right => {
-                        note_x += match keycode {
-                            Keycode::Right => 1,
-                            _ => -1,
-                        } * match () {
-                            _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 10,
-                            _ => 1,
+                } => {
+                    let alt = keymod.intersects(Mod::LALTMOD | Mod::RALTMOD);
+                    let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
+                    match keycode {
+                        Keycode::Space => do_play = !do_play,
+                        Keycode::Z => zoom_proportion += 1,
+                        Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
+                        Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
+                        Keycode::F => fixed = !fixed,
+                        Keycode::S if alt => speed_up = !speed_up,
+                        Keycode::C => cursor_mode = !cursor_mode,
+                        Keycode::G => draw_gauge = !draw_gauge,
+                        Keycode::Q => texture_width = max(1, texture_width - 1),
+                        Keycode::W => texture_width += 1,
+                        Keycode::L => {
+                            config.refresh()?;
+                            let notes_path = config.get_str("notes_image").ok();
+                            image_texture = match image_path {
+                                Some(ref image_path) => {
+                                    Some(texture_creator.load_texture(image_path)?)
+                                }
+                                _ => None,
+                            };
+                            notes_texture = match notes_path {
+                                Some(ref path) => {
+                                    let t = texture_creator.load_texture(path)?;
+                                    texture_width = t.query().width;
+                                    Some(t)
+                                }
+                                _ => None,
+                            };
+                            textures = Textures::new(&texture_creator)?;
                         }
-                    }
-                    Keycode::Up | Keycode::Down => {
-                        note_y += match keycode {
-                            Keycode::Down => 1,
-                            _ => -1,
-                        } * match () {
-                            _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 10,
-                            _ => 1,
+                        Keycode::P => {
+                            println!("{}\t{}\t{}\t{}", frame_id, note_x, note_y, texture_width);
                         }
-                    }
-                    Keycode::Period => {
-                        if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
-                            update_frame_to_texture(&frame, &mut video_texture)?;
-                            if let Some(t) = frame.pts() {
-                                pts = t;
+                        Keycode::Left | Keycode::Right => {
+                            note_x += match keycode {
+                                Keycode::Right => 1,
+                                _ => -1,
+                            } * match () {
+                                _ if shift => 10,
+                                _ => 1,
                             }
                         }
+                        Keycode::Up | Keycode::Down => {
+                            note_y += match keycode {
+                                Keycode::Down => 1,
+                                _ => -1,
+                            } * match () {
+                                _ if shift => 10,
+                                _ => 1,
+                            }
+                        }
+                        Keycode::Period => {
+                            if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
+                                update_frame_to_texture(&frame, &mut video_texture)?;
+                                if let Some(t) = frame.pts() {
+                                    pts = t;
+                                }
+                            }
+                        }
+                        Keycode::J | Keycode::K => {
+                            score_time_delta += match keycode {
+                                Keycode::J => -1.,
+                                _ => 1.,
+                            } * match () {
+                                _ if alt => 1.,
+                                _ if shift => 0.01,
+                                _ => 0.0001,
+                            };
+                        }
+                        Keycode::PageDown => {
+                            packet_iterator = seek(
+                                SeekTarget::Timestamp(pts.saturating_sub(1)),
+                                time_base,
+                                &mut input_context,
+                                stream_index,
+                                &mut decoder,
+                                &mut frame,
+                                &mut video_texture,
+                                &mut pts,
+                            )?;
+                        }
+                        Keycode::PageUp => {
+                            let timestamp_delta = Rational::new(10, 1) / time_base;
+                            let target_timestamp =
+                                pts + (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
+                            packet_iterator = seek(
+                                SeekTarget::Timestamp(target_timestamp),
+                                time_base,
+                                &mut input_context,
+                                stream_index,
+                                &mut decoder,
+                                &mut frame,
+                                &mut video_texture,
+                                &mut pts,
+                            )?;
+                        }
+                        Keycode::Num2 if shift => show_score = !show_score,
+                        _ => {}
                     }
-                    Keycode::J | Keycode::K => {
-                        score_time_delta += match keycode {
-                            Keycode::J => -1.,
-                            _ => 1.,
-                        } * match () {
-                            _ if keymod.intersects(Mod::LALTMOD | Mod::RALTMOD) => 1.,
-                            _ if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) => 0.01,
-                            _ => 0.0001,
-                        };
-                    }
-                    Keycode::PageDown => {
-                        packet_iterator = seek(
-                            SeekTarget::Timestamp(pts.saturating_sub(1)),
-                            time_base,
-                            &mut input_context,
-                            stream_index,
-                            &mut decoder,
-                            &mut frame,
-                            &mut video_texture,
-                            &mut pts,
-                        )?;
-                    }
-                    Keycode::PageUp => {
-                        let timestamp_delta = Rational::new(10, 1) / time_base;
-                        let target_timestamp =
-                            pts + (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
-                        packet_iterator = seek(
-                            SeekTarget::Timestamp(target_timestamp),
-                            time_base,
-                            &mut input_context,
-                            stream_index,
-                            &mut decoder,
-                            &mut frame,
-                            &mut video_texture,
-                            &mut pts,
-                        )?;
-                    }
-                    _ => {}
-                },
+                }
                 Event::MouseMotion { x, y, .. } => {
                     if !fixed {
                         focus_x = x * (hidpi_prop as i32);
@@ -422,7 +428,7 @@ fn main() -> Result<(), MainErr> {
             canvas.set_clip_rect(None);
         }
 
-        if let Some(score) = &score {
+        if let (Some(score), true) = (&score, show_score) {
             let rect = game_rect();
             let (tx, ty) = (rect.x + rect.w as i32, rect.y + rect.h as i32);
             let (sx, sy) = (focus_x.clamp(rect.x, tx), focus_y.clamp(rect.y, ty));
