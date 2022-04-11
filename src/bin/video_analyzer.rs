@@ -18,8 +18,9 @@ use std::time::Instant;
 use taiko_untitled::assets::Assets;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 use taiko_untitled::game::draw_game_notes;
-use taiko_untitled::game_graphics::game_rect;
+use taiko_untitled::game_graphics::{draw_note, game_rect};
 use taiko_untitled::game_manager::GameManager;
+use taiko_untitled::structs::{NoteColor, NoteSize, SingleNoteKind};
 use taiko_untitled::tja::load_tja_from_file;
 use taiko_untitled::video_analyzer_assets::Textures;
 
@@ -205,12 +206,14 @@ fn main() -> Result<(), MainErr> {
     let mut fixed = false;
     let mut speed_up = false;
     let mut cursor_mode = false;
-    let (mut note_x, mut note_y) = (500, 288);
+    let (mut texture_x, mut texture_y) = (500, 288);
     let frame_id = -1; // TODO: remove this variable
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
     let mut draw_gauge = false;
     let mut score_time_delta = config.get_float("score_time_delta").unwrap_or(0.0);
     let mut show_score = true;
+    let mut note_kind = None;
+    let mut note_x = 500;
 
     let mut pts = 0;
 
@@ -258,19 +261,28 @@ fn main() -> Result<(), MainErr> {
                             textures = Textures::new(&texture_creator)?;
                         }
                         Keycode::P => {
-                            println!("{}\t{}\t{}\t{}", frame_id, note_x, note_y, texture_width);
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                frame_id, texture_x, texture_y, texture_width
+                            );
                         }
                         Keycode::Left | Keycode::Right => {
-                            note_x += match keycode {
+                            let sign = match keycode {
                                 Keycode::Right => 1,
                                 _ => -1,
-                            } * match () {
+                            };
+                            let amount = match () {
                                 _ if shift => 10,
                                 _ => 1,
+                            };
+                            if alt {
+                                texture_x += sign * amount;
+                            } else {
+                                note_x += sign * amount;
                             }
                         }
                         Keycode::Up | Keycode::Down => {
-                            note_y += match keycode {
+                            texture_y += match keycode {
                                 Keycode::Down => 1,
                                 _ => -1,
                             } * match () {
@@ -324,6 +336,35 @@ fn main() -> Result<(), MainErr> {
                             )?;
                         }
                         Keycode::Num2 if shift => show_score = !show_score,
+                        Keycode::Num0 if alt => note_kind = None,
+                        Keycode::Num1 if alt => {
+                            note_kind = Some(SingleNoteKind {
+                                color: NoteColor::Don,
+                                size: NoteSize::Small,
+                            })
+                        }
+                        Keycode::Num2 if alt => {
+                            note_kind = Some(SingleNoteKind {
+                                color: NoteColor::Ka,
+                                size: NoteSize::Small,
+                            })
+                        }
+                        Keycode::Num3 if alt => {
+                            note_kind = Some(SingleNoteKind {
+                                color: NoteColor::Don,
+                                size: NoteSize::Large,
+                            })
+                        }
+                        Keycode::Num4 if alt => {
+                            note_kind = Some(SingleNoteKind {
+                                color: NoteColor::Ka,
+                                size: NoteSize::Large,
+                            })
+                        }
+                        Keycode::Slash if shift => {
+                            let time = f64::from(Rational::new(pts as i32, 1) * time_base);
+                            println!("{:.3} {}", time, note_x);
+                        }
                         _ => {}
                     }
                 }
@@ -397,7 +438,7 @@ fn main() -> Result<(), MainErr> {
                 canvas.copy(
                     notes_texture,
                     note_dimension,
-                    affine(note_x, note_y, texture_width, dim.height),
+                    affine(texture_x, texture_y, texture_width, dim.height),
                 )?;
             }
 
@@ -428,19 +469,27 @@ fn main() -> Result<(), MainErr> {
             canvas.set_clip_rect(None);
         }
 
-        if let (Some(score), true) = (&score, show_score) {
-            let rect = game_rect();
-            let (tx, ty) = (rect.x + rect.w as i32, rect.y + rect.h as i32);
-            let (sx, sy) = (focus_x.clamp(rect.x, tx), focus_y.clamp(rect.y, ty));
-            let rect = Rect::new(sx, sy, (tx - sx) as _, (ty - sy) as _);
-            canvas.set_clip_rect(rect);
-            canvas.set_draw_color((28, 28, 28));
-            canvas.fill_rect(rect)?;
-            let time = f64::from(Rational::new(pts as i32, 1) * time_base) + score_time_delta;
-            draw_game_notes(&mut canvas, &game_assets, time, score)
-                .map_err(|e| MainErr(format!("{:?}", e)))?;
-            canvas.set_clip_rect(None);
+        let rect = game_rect();
+        let (tx, ty) = (rect.x + rect.w as i32, rect.y + rect.h as i32);
+        let (sx, sy) = (focus_x.clamp(rect.x, tx), focus_y.clamp(rect.y, ty));
+        let rect = Rect::new(sx, sy, (tx - sx) as _, (ty - sy) as _);
+        canvas.set_clip_rect(rect);
+        {
+            if score.is_some() && show_score || note_kind.is_some() {
+                canvas.set_draw_color((28, 28, 28));
+                canvas.fill_rect(rect)?;
+            }
+            if let Some(note_kind) = note_kind {
+                draw_note(&mut canvas, &game_assets, &note_kind, note_x, game_rect().y)
+                    .map_err(debug_to_err())?;
+            }
+            if let (Some(score), true) = (&score, show_score) {
+                let time = f64::from(Rational::new(pts as i32, 1) * time_base) + score_time_delta;
+                draw_game_notes(&mut canvas, &game_assets, time, score)
+                    .map_err(|e| MainErr(format!("{:?}", e)))?;
+            }
         }
+        canvas.set_clip_rect(None);
 
         let infos = [
             format!("({}, {})", focus_x, focus_y),
