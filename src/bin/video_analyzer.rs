@@ -298,7 +298,7 @@ fn main() -> Result<(), MainErr> {
                             }
                         }
                         Keycode::Period => {
-                            if !frame_buffer.advance() {
+                            if !frame_buffer.forward() {
                                 frame_buffer.try_append_and_jump_there::<MainErr, _>(
                                     |video_texture| {
                                         if next_frame(
@@ -316,6 +316,11 @@ fn main() -> Result<(), MainErr> {
                                         }
                                     },
                                 )?;
+                            }
+                        }
+                        Keycode::Comma => {
+                            if !frame_buffer.backward() {
+                                // TODO: seek to the last keyframe before the current frame
                             }
                         }
                         Keycode::J | Keycode::K => {
@@ -424,7 +429,7 @@ fn main() -> Result<(), MainErr> {
             //     }
             // }
             // TODO: duplicate
-            if !frame_buffer.advance() {
+            if !frame_buffer.forward() {
                 frame_buffer.try_append_and_jump_there::<MainErr, _>(|video_texture| {
                     if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
                         update_frame_to_texture(&frame, video_texture)?;
@@ -684,10 +689,20 @@ impl<T> RingBuffer<T> {
         })
     }
 
-    fn advance(&mut self) -> bool {
+    fn forward(&mut self) -> bool {
         let next = self.next_index(self.cursor);
         if self.valid_index(next) {
             self.cursor = next;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn backward(&mut self) -> bool {
+        let previous = self.previous_index(self.cursor);
+        if self.valid_index(previous) {
+            self.cursor = previous;
             true
         } else {
             false
@@ -711,6 +726,10 @@ impl<T> RingBuffer<T> {
     fn current(&self) -> Option<&T> {
         self.valid_index(self.cursor)
             .then(|| &self.elements[self.cursor])
+    }
+
+    fn previous_index(&self, index: usize) -> usize {
+        index.checked_sub(1).unwrap_or(self.elements.len() - 1)
     }
 
     fn next_index(&self, index: usize) -> usize {
