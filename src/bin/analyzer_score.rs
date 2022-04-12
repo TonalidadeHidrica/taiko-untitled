@@ -3,11 +3,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use chardetng::EncodingDetector;
 use clap::Parser;
 use itertools::Itertools;
 
+use num::{BigInt, BigRational};
 use taiko_untitled::tja::ParseFirst;
 
 #[derive(Parser)]
@@ -17,13 +18,64 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    println!("{:?}", load_score(&opts.file));
+
+    let mut measure_length = (4u64, 4u64);
+
+    let score = load_score(&opts.file)?;
+
+    for (i, elements) in (1..).zip(score.iter()) {
+        let measure_elems = elements
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| match x {
+                TjaElement::Measure(x, y) => Some((i, (x, y))),
+                _ => None,
+            })
+            .take(2)
+            .collect_vec();
+        if measure_elems.len() >= 2 {
+            bail!("Mulitple #MEASURE in the same measure");
+        }
+        if let Some(&(measure_i, (x, y))) = measure_elems.get(0) {
+            if elements.iter().enumerate().any(|(i, x)| match x {
+                TjaElement::NoteChar(..) => i < measure_i,
+                _ => false,
+            }) {
+                bail!("#MEASURE after a note in a measure");
+            }
+            if x.fract() > 1e-5 || y.fract() > 1e-5 {
+                bail!("fractional measure");
+            }
+            let x = x.trunc() as u64;
+            let y = y.trunc() as u64;
+            measure_length = (x, y);
+        }
+
+        let note_count = elements
+            .iter()
+            .filter(|x| matches!(x, TjaElement::NoteChar(..)))
+            .count();
+        let step_per_note = BigRational::new(measure_length.0.into(), measure_length.1.into())
+            / BigInt::from(note_count.max(1));
+        {
+            let d = u64::try_from(step_per_note.denom()).context("Too large denominator")?;
+            // divisor of 48 => ok
+            // not divisor by 64 => ng
+            // divisor of 64 & multiple notes => ng
+            if 48 % d > 0 && 64 % d > 0 {
+                println!(
+                    "Measure {}: {}/{} => {} {:?}",
+                    i, measure_length.0, measure_length.1, step_per_note, elements
+                );
+            }
+        }
+    }
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 enum TjaElement {
-    NoteChar(char),
+    NoteChar(usize, char),
     BpmChange(f64),
     Measure(f64, f64),
     Scroll(f64),
@@ -39,13 +91,13 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<Vec<Vec<TjaElem
     if encoding != actual_encoding || replacement {
         bail!("Failed to decode {:?}", path);
     }
-    let mut lines = source.lines();
-    lines.by_ref().find(|x| x.starts_with("#START"));
+    let mut lines = (1..).zip(source.lines());
+    lines.by_ref().find(|x| x.1.starts_with("#START"));
 
     let mut elements_buffer = vec![];
     let mut measures = vec![];
 
-    for line in lines {
+    for (i, line) in lines {
         // TODO check if this parser is compatible
         let line = line
             .split("//")
@@ -103,7 +155,7 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<Vec<Vec<TjaElem
                 .next()
                 .expect("split() returns always at least one element");
             elements_buffer.extend(line.chars().filter_map(|c| match c {
-                '0'..='9' => Some(TjaElement::NoteChar(c)),
+                '0'..='9' => Some(TjaElement::NoteChar(i, c)),
                 _ => None,
             }));
             if split.next().is_some() {
