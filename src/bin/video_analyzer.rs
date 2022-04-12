@@ -216,7 +216,7 @@ fn main() -> Result<(), MainErr> {
     let mut fixed = false;
     let mut speed_up = false;
     let mut cursor_mode = false;
-    let (mut texture_x, mut texture_y) = (500, 288);
+    let (texture_x, mut texture_y) = (500, 288);
     let frame_id = -1; // TODO: remove this variable
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
     let mut draw_gauge = false;
@@ -282,14 +282,15 @@ fn main() -> Result<(), MainErr> {
                                 _ => -1,
                             };
                             let amount = match () {
+                                _ if alt => 100,
                                 _ if shift => 10,
                                 _ => 1,
                             };
-                            if alt {
-                                texture_x += sign * amount;
-                            } else {
-                                note_x += sign * amount;
-                            }
+                            // if alt {
+                            //     texture_x += sign * amount;
+                            // } else {
+                            note_x += sign * amount;
+                            // }
                         }
                         Keycode::Up | Keycode::Down => {
                             texture_y += match keycode {
@@ -348,8 +349,9 @@ fn main() -> Result<(), MainErr> {
                                 _ => -1,
                             };
                             let timestamp_delta = Rational::new(2, 1) / time_base;
-                            let target_timestamp =
-                                pts + sign * (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
+                            let target_timestamp = pts
+                                + sign
+                                    * (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
                             packet_iterator = seek(
                                 SeekTarget::Timestamp(target_timestamp),
                                 time_base,
