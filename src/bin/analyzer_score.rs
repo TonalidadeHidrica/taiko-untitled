@@ -8,8 +8,8 @@ use chardetng::EncodingDetector;
 use clap::Parser;
 use itertools::Itertools;
 
-use num::{BigInt, BigRational};
-use taiko_untitled::tja::ParseFirst;
+use num::{BigInt, BigRational, Zero};
+use taiko_untitled::{structs::SingleNoteKind, tja::ParseFirst};
 
 #[derive(Parser)]
 struct Opts {
@@ -20,9 +20,10 @@ fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
 
     let mut measure_length = (4u64, 4u64);
+    let mut beat = BigRational::zero();
+    let mut notes = vec![];
 
     let score = load_score(&opts.file)?;
-
     for (i, elements) in (1..).zip(score.iter()) {
         let measure_elems = elements
             .iter()
@@ -55,22 +56,57 @@ fn main() -> anyhow::Result<()> {
             .iter()
             .filter(|x| matches!(x, TjaElement::NoteChar(..)))
             .count();
-        let step_per_note = BigRational::new(measure_length.0.into(), measure_length.1.into())
-            / BigInt::from(note_count.max(1));
+        let step_measure = BigRational::new(measure_length.0.into(), measure_length.1.into());
+        let step_per_note = &step_measure / &BigInt::from(note_count.max(1));
         {
             let d = u64::try_from(step_per_note.denom()).context("Too large denominator")?;
-            // divisor of 48 => ok
-            // not divisor by 64 => ng
-            // divisor of 64 & multiple notes => ng
+            // divisor of 48 or 64
             if 48 % d > 0 && 64 % d > 0 {
-                println!(
+                bail!(
                     "Measure {}: {}/{} => {} {:?}",
                     i, measure_length.0, measure_length.1, step_per_note, elements
                 );
             }
         }
+
+        for element in elements {
+            match element {
+                TjaElement::NoteChar(_, c) => {
+                    use taiko_untitled::structs::NoteColor::*;
+                    use taiko_untitled::structs::NoteSize::*;
+                    let kind = match c {
+                        '0' => None,
+                        '1' => Some((Don, Small)),
+                        '2' => Some((Ka, Small)),
+                        '3' => Some((Don, Large)),
+                        '4' => Some((Ka, Large)),
+                        _ => bail!("Unknown note char"),
+                    };
+                    if let Some((color, size)) = kind {
+                        notes.push(NoteScore {
+                            beat: beat.clone(),
+                            kind: SingleNoteKind { color, size },
+                        });
+                    }
+                    beat += &step_per_note;
+                }
+                TjaElement::BpmChange(_) => {},
+                TjaElement::Measure(_, _) => {},
+                TjaElement::Scroll(_) => {},
+            }
+        }
+        if note_count == 0 {
+            beat += &step_measure;
+        }
     }
+    println!("{:?}", notes);
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct NoteScore {
+    kind: SingleNoteKind,
+    beat: BigRational,
 }
 
 #[derive(Clone, Copy, Debug)]
