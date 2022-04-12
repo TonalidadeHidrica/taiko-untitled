@@ -5,6 +5,7 @@ use ffmpeg4::sys::{av_seek_frame, AVSEEK_FLAG_BACKWARD};
 use ffmpeg4::util::{frame, media};
 use ffmpeg4::{format, Packet, Rational};
 use itertools::Itertools;
+use ordered_float::OrderedFloat;
 use sdl2::event::Event;
 use sdl2::image::LoadTexture;
 use sdl2::keyboard::{Keycode, Mod};
@@ -20,7 +21,7 @@ use taiko_untitled::assets::Assets;
 use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
 use taiko_untitled::game::draw_game_notes;
 use taiko_untitled::game_graphics::{draw_note, game_rect};
-use taiko_untitled::game_manager::GameManager;
+use taiko_untitled::game_manager::{GameManager, Score};
 use taiko_untitled::structs::{NoteColor, NoteSize, SingleNoteKind};
 use taiko_untitled::tja::load_tja_from_file;
 use taiko_untitled::video_analyzer_assets::Textures;
@@ -141,23 +142,7 @@ fn main() -> Result<(), MainErr> {
                 _ => None,
             });
 
-    let score_path = config.get::<PathBuf>("score");
-    let get_score = || -> Result<_, MainErr> {
-        Ok(score_path
-            .as_ref()
-            .ok()
-            .map(|f| load_tja_from_file(&f))
-            .transpose()
-            .map_err(|e| MainErr(format!("{:?}", e)))?
-            .map(|song| {
-                song.score
-                    .ok_or_else(|| MainErr("Score not found in the tja file".into()))
-            })
-            .transpose()?
-            .map(|score| GameManager::new(&score).score))
-    };
-
-    let mut score = get_score()?;
+    let mut score = get_scores(config);
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -252,7 +237,9 @@ fn main() -> Result<(), MainErr> {
                         Keycode::Q if alt => texture_width = max(1, texture_width - 1),
                         Keycode::W if alt => texture_width += 1,
                         Keycode::L => {
-                            config.refresh()?;
+                            if let Err(e) = config.refresh() {
+                                println!("Failed to load the config file: {:?}", e);
+                            }
                             let notes_path = config.get_str("notes_image").ok();
                             image_texture = match image_path {
                                 Some(ref image_path) => {
@@ -393,14 +380,10 @@ fn main() -> Result<(), MainErr> {
                             println!("{:.3} {}", time, note_x);
                         }
                         Keycode::Q => {
-                            config.refresh()?;
-                            match get_score() {
-                                Err(e) => println!("Failed loading the score: {:?}", e),
-                                Ok(None) => println!(
-                                "`score` is not specified or the tja file does not have a score"
-                            ),
-                                Ok(s) => score = s,
+                            if let Err(e) = config.refresh() {
+                                println!("Failed to load the config file: {:?}", e);
                             }
+                            score = get_scores(config);
                         }
                         _ => {}
                     }
@@ -773,4 +756,56 @@ impl<T> RingBuffer<T> {
             (self.start..self.elements.len()).contains(&index) || (0..self.end).contains(&index)
         }
     }
+}
+
+fn get_scores(config: &Config) -> Option<Score> {
+    let score_paths = match config.get::<Vec<PathBuf>>("scores") {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Could not get `scores` config: {:?}", e);
+            vec![]
+        }
+    };
+    let mut combined = Score {
+        notes: vec![],
+        bar_lines: vec![],
+        branches: vec![],
+        branch_events: vec![],
+    };
+    let mut score_added = false;
+    for score_path in score_paths {
+        let song = match load_tja_from_file(&score_path) {
+            Ok(s) => s,
+            Err(e) => {
+                println!("Error when loading tja file: {:?}", e);
+                continue;
+            }
+        };
+        let score = match song.score {
+            Some(s) => s,
+            None => {
+                println!("Score not found in: {:?}", score_path);
+                continue;
+            }
+        };
+        let score = GameManager::new(&score).score;
+        combined.notes.extend(score.notes);
+        combined.bar_lines.extend(score.bar_lines);
+        combined.branches.extend(score.branches);
+        combined.branch_events.extend(score.branch_events);
+        score_added = true;
+    }
+
+    combined.notes.sort_by_key(|n| OrderedFloat::from(n.time));
+    combined
+        .bar_lines
+        .sort_by_key(|n| OrderedFloat::from(n.time));
+    combined
+        .branches
+        .sort_by_key(|n| OrderedFloat::from(n.switch_time));
+    combined
+        .branch_events
+        .sort_by_key(|n| OrderedFloat::from(n.time));
+
+    score_added.then(|| combined)
 }
