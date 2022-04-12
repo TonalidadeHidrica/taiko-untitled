@@ -842,7 +842,7 @@ where
     None
 }
 
-trait ParseFirst<V> {
+pub trait ParseFirst<V> {
     fn parse_first(self) -> Option<V>;
 }
 
