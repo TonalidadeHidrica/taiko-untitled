@@ -13,6 +13,7 @@ use sdl2::rect::{Point, Rect};
 use sdl2::render::Texture;
 use std::cmp::max;
 use std::fmt::Debug;
+use std::iter::repeat_with;
 use std::path::PathBuf;
 use std::time::Instant;
 use taiko_untitled::assets::Assets;
@@ -175,8 +176,9 @@ fn main() -> Result<(), MainErr> {
     let ttf_context = sdl2::ttf::init()?;
 
     let texture_creator = canvas.texture_creator();
-    let mut video_texture =
-        texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)?;
+    let mut frame_buffer = RingBuffer::try_new(15, || {
+        texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)
+    })?;
     let mut image_texture = match image_path {
         Some(ref image_path) => Some(texture_creator.load_texture(image_path)?),
         _ => None,
@@ -296,11 +298,24 @@ fn main() -> Result<(), MainErr> {
                             }
                         }
                         Keycode::Period => {
-                            if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
-                                update_frame_to_texture(&frame, &mut video_texture)?;
-                                if let Some(t) = frame.pts() {
-                                    pts = t;
-                                }
+                            if !frame_buffer.advance() {
+                                frame_buffer.try_append_and_jump_there::<MainErr, _>(
+                                    |video_texture| {
+                                        if next_frame(
+                                            &mut packet_iterator,
+                                            &mut decoder,
+                                            &mut frame,
+                                        )? {
+                                            update_frame_to_texture(&frame, video_texture)?;
+                                            if let Some(t) = frame.pts() {
+                                                pts = t;
+                                            }
+                                            Ok(true)
+                                        } else {
+                                            Ok(false)
+                                        }
+                                    },
+                                )?;
                             }
                         }
                         Keycode::J | Keycode::K => {
@@ -313,33 +328,33 @@ fn main() -> Result<(), MainErr> {
                                 _ => 0.0001,
                             };
                         }
-                        Keycode::PageDown => {
-                            packet_iterator = seek(
-                                SeekTarget::Timestamp(pts.saturating_sub(1)),
-                                time_base,
-                                &mut input_context,
-                                stream_index,
-                                &mut decoder,
-                                &mut frame,
-                                &mut video_texture,
-                                &mut pts,
-                            )?;
-                        }
-                        Keycode::PageUp => {
-                            let timestamp_delta = Rational::new(10, 1) / time_base;
-                            let target_timestamp =
-                                pts + (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
-                            packet_iterator = seek(
-                                SeekTarget::Timestamp(target_timestamp),
-                                time_base,
-                                &mut input_context,
-                                stream_index,
-                                &mut decoder,
-                                &mut frame,
-                                &mut video_texture,
-                                &mut pts,
-                            )?;
-                        }
+                        // Keycode::PageDown => {
+                        //     packet_iterator = seek(
+                        //         SeekTarget::Timestamp(pts.saturating_sub(1)),
+                        //         time_base,
+                        //         &mut input_context,
+                        //         stream_index,
+                        //         &mut decoder,
+                        //         &mut frame,
+                        //         &mut video_texture,
+                        //         &mut pts,
+                        //     )?;
+                        // }
+                        // Keycode::PageUp => {
+                        //     let timestamp_delta = Rational::new(10, 1) / time_base;
+                        //     let target_timestamp =
+                        //         pts + (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
+                        //     packet_iterator = seek(
+                        //         SeekTarget::Timestamp(target_timestamp),
+                        //         time_base,
+                        //         &mut input_context,
+                        //         stream_index,
+                        //         &mut decoder,
+                        //         &mut frame,
+                        //         &mut video_texture,
+                        //         &mut pts,
+                        //     )?;
+                        // }
                         Keycode::Num2 if shift => show_score = !show_score,
                         Keycode::Num0 if alt => note_kind = None,
                         Keycode::Num1 if alt => {
@@ -402,22 +417,31 @@ fn main() -> Result<(), MainErr> {
         };
 
         if do_play {
-            if speed_up {
-                for _ in 0..5 {
-                    // TODO: do we really have to decode the frame?
-                    next_frame(&mut packet_iterator, &mut decoder, &mut frame)?;
-                }
-            }
+            // if speed_up {
+            //     for _ in 0..5 {
+            //         // TODO: do we really have to decode the frame?
+            //         next_frame(&mut packet_iterator, &mut decoder, &mut frame)?;
+            //     }
+            // }
             // TODO: duplicate
-            if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
-                update_frame_to_texture(&frame, &mut video_texture)?;
-                if let Some(t) = frame.pts() {
-                    pts = t;
-                }
+            if !frame_buffer.advance() {
+                frame_buffer.try_append_and_jump_there::<MainErr, _>(|video_texture| {
+                    if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
+                        update_frame_to_texture(&frame, video_texture)?;
+                        if let Some(t) = frame.pts() {
+                            pts = t;
+                        }
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                })?;
             }
         }
 
-        canvas.copy(&video_texture, None, affine(0, 0, width, height))?;
+        if let Some(video_texture) = frame_buffer.current() {
+            canvas.copy(video_texture, None, affine(0, 0, width, height))?;
+        }
 
         if cursor_mode {
             canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
@@ -630,4 +654,74 @@ fn update_frame_to_texture(
         frame.stride(2),
     )?;
     Ok(())
+}
+
+struct RingBuffer<T> {
+    elements: Vec<T>,
+    start: usize,
+    end: usize,
+    cursor: usize,
+}
+
+impl<T> std::fmt::Debug for RingBuffer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RingBuffer")
+            .field("elements", &[..])
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("cursor", &self.cursor)
+            .finish()
+    }
+}
+
+impl<T> RingBuffer<T> {
+    fn try_new<E>(len: usize, gen: impl FnMut() -> Result<T, E>) -> Result<Self, E> {
+        Ok(Self {
+            elements: repeat_with(gen).take(len).collect::<Result<Vec<T>, E>>()?,
+            start: 0,
+            end: 0,
+            cursor: 0,
+        })
+    }
+
+    fn advance(&mut self) -> bool {
+        let next = self.next_index(self.cursor);
+        if self.valid_index(next) {
+            self.cursor = next;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn try_append_and_jump_there<E, F>(&mut self, f: F) -> Result<(), E>
+    where
+        F: FnOnce(&mut T) -> Result<bool, E>,
+    {
+        if f(&mut self.elements[self.end])? {
+            self.cursor = self.end;
+            self.end = self.next_index(self.end);
+            if self.end == self.start {
+                self.start = self.next_index(self.start);
+            }
+        }
+        Ok(())
+    }
+
+    fn current(&self) -> Option<&T> {
+        self.valid_index(self.cursor)
+            .then(|| &self.elements[self.cursor])
+    }
+
+    fn next_index(&self, index: usize) -> usize {
+        (index + 1) % self.elements.len()
+    }
+
+    fn valid_index(&self, index: usize) -> bool {
+        if self.start <= self.end {
+            (self.start..self.end).contains(&index)
+        } else {
+            (self.start..self.elements.len()).contains(&index) || (0..self.end).contains(&index)
+        }
+    }
 }
