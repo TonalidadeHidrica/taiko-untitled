@@ -392,13 +392,16 @@ fn main() -> Result<(), MainErr> {
                             let time = f64::from(Rational::new(pts as i32, 1) * time_base);
                             println!("{:.3} {}", time, note_x);
                         }
-                        Keycode::Q => match get_score() {
-                            Err(e) => println!("Failed loading the score: {:?}", e),
-                            Ok(None) => println!(
+                        Keycode::Q => {
+                            config.refresh()?;
+                            match get_score() {
+                                Err(e) => println!("Failed loading the score: {:?}", e),
+                                Ok(None) => println!(
                                 "`score` is not specified or the tja file does not have a score"
                             ),
-                            Ok(s) => score = s,
-                        },
+                                Ok(s) => score = s,
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -424,23 +427,22 @@ fn main() -> Result<(), MainErr> {
         };
 
         if do_play {
-            // if speed_up {
-            //     for _ in 0..5 {
-            //         // TODO: do we really have to decode the frame?
-            //         next_frame(&mut packet_iterator, &mut decoder, &mut frame)?;
-            //     }
-            // }
-            // TODO: duplicate
-            if !frame_buffer.forward() {
-                frame_buffer.try_append_and_jump_there::<MainErr, _>(|(video_texture, pts)| {
-                    if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
-                        update_frame_to_texture(&frame, video_texture)?;
-                        *pts = frame.pts();
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                })?;
+            let times = if speed_up { 5 } else { 1 };
+            for _ in 0..times {
+                // TODO: duplicate
+                if !frame_buffer.forward() {
+                    frame_buffer.try_append_and_jump_there::<MainErr, _>(
+                        |(video_texture, pts)| {
+                            if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
+                                update_frame_to_texture(&frame, video_texture)?;
+                                *pts = frame.pts();
+                                Ok(true)
+                            } else {
+                                Ok(false)
+                            }
+                        },
+                    )?;
+                }
             }
         }
 
