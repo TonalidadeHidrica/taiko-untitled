@@ -1,14 +1,14 @@
 use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
+use fs_err::File;
 use itertools::Itertools;
 use retain_mut::RetainMut;
 use rodio::source::UniformSourceIterator;
 use rodio::{Decoder, Source};
 use std::collections::VecDeque;
-use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::thread;
@@ -547,7 +547,7 @@ impl<T> AudioThreadState<T> {
     }
 
     pub fn load_music(&self, wave: PathBuf) -> Result<MusicSource, TaikoError> {
-        let file = std::fs::File::open(wave).map_err(|e| TaikoError {
+        let file = fs_err::File::open(wave).map_err(|e| TaikoError {
             message: "Failed to open music file".to_string(),
             cause: TaikoErrorCause::AudioLoadError(e),
         })?;
@@ -575,7 +575,7 @@ impl SoundBuffer {
         sample_rate: SampleRate,
     ) -> Result<SoundBuffer, TaikoError>
     where
-        P: AsRef<Path>,
+        P: Into<PathBuf>,
     {
         let file = File::open(filename).map_err(|e| TaikoError {
             message: "Failed to open sound chunk file".to_string(),

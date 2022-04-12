@@ -16,6 +16,7 @@ derive_more = "0.99.11"
 encoding_rs = "0.8.24"
 enum-map = "0.6.3"
 ffmpeg4 = { git = "https://github.com/TonalidadeHidrica/rust-ffmpeg4", branch = "fix-missing-variable" }
+fs-err = "2.7.0"
 itertools = "0.10.2"
 notify = "4.0.15"
 num = "0.4.0"
