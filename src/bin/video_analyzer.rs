@@ -176,8 +176,11 @@ fn main() -> Result<(), MainErr> {
     let ttf_context = sdl2::ttf::init()?;
 
     let texture_creator = canvas.texture_creator();
-    let mut frame_buffer = RingBuffer::try_new(15, || {
-        texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)
+    let mut frame_buffer = RingBuffer::try_new::<MainErr, _>(15, || {
+        Ok((
+            texture_creator.create_texture_streaming(Some(PixelFormatEnum::IYUV), width, height)?,
+            None,
+        ))
     })?;
     let mut image_texture = match image_path {
         Some(ref image_path) => Some(texture_creator.load_texture(image_path)?),
@@ -222,7 +225,7 @@ fn main() -> Result<(), MainErr> {
     let mut note_kind = None;
     let mut note_x = 500;
 
-    let mut pts = 0;
+    let mut pts: i64 = 0;
 
     let start = Instant::now();
 
@@ -300,16 +303,14 @@ fn main() -> Result<(), MainErr> {
                         Keycode::Period => {
                             if !frame_buffer.forward() {
                                 frame_buffer.try_append_and_jump_there::<MainErr, _>(
-                                    |video_texture| {
+                                    |(video_texture, pts)| {
                                         if next_frame(
                                             &mut packet_iterator,
                                             &mut decoder,
                                             &mut frame,
                                         )? {
                                             update_frame_to_texture(&frame, video_texture)?;
-                                            if let Some(t) = frame.pts() {
-                                                pts = t;
-                                            }
+                                            *pts = frame.pts();
                                             Ok(true)
                                         } else {
                                             Ok(false)
@@ -320,7 +321,15 @@ fn main() -> Result<(), MainErr> {
                         }
                         Keycode::Comma => {
                             if !frame_buffer.backward() {
-                                // TODO: seek to the last keyframe before the current frame
+                                packet_iterator = seek(
+                                    SeekTarget::Timestamp(pts.saturating_sub(1)),
+                                    time_base,
+                                    &mut input_context,
+                                    stream_index,
+                                    &mut decoder,
+                                    &mut frame,
+                                    &mut frame_buffer,
+                                )?;
                             }
                         }
                         Keycode::J | Keycode::K => {
@@ -333,33 +342,24 @@ fn main() -> Result<(), MainErr> {
                                 _ => 0.0001,
                             };
                         }
-                        // Keycode::PageDown => {
-                        //     packet_iterator = seek(
-                        //         SeekTarget::Timestamp(pts.saturating_sub(1)),
-                        //         time_base,
-                        //         &mut input_context,
-                        //         stream_index,
-                        //         &mut decoder,
-                        //         &mut frame,
-                        //         &mut video_texture,
-                        //         &mut pts,
-                        //     )?;
-                        // }
-                        // Keycode::PageUp => {
-                        //     let timestamp_delta = Rational::new(10, 1) / time_base;
-                        //     let target_timestamp =
-                        //         pts + (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
-                        //     packet_iterator = seek(
-                        //         SeekTarget::Timestamp(target_timestamp),
-                        //         time_base,
-                        //         &mut input_context,
-                        //         stream_index,
-                        //         &mut decoder,
-                        //         &mut frame,
-                        //         &mut video_texture,
-                        //         &mut pts,
-                        //     )?;
-                        // }
+                        Keycode::PageUp | Keycode::PageDown => {
+                            let sign = match keycode {
+                                Keycode::PageUp => 1,
+                                _ => -1,
+                            };
+                            let timestamp_delta = Rational::new(2, 1) / time_base;
+                            let target_timestamp =
+                                pts + sign * (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
+                            packet_iterator = seek(
+                                SeekTarget::Timestamp(target_timestamp),
+                                time_base,
+                                &mut input_context,
+                                stream_index,
+                                &mut decoder,
+                                &mut frame,
+                                &mut frame_buffer,
+                            )?;
+                        }
                         Keycode::Num2 if shift => show_score = !show_score,
                         Keycode::Num0 if alt => note_kind = None,
                         Keycode::Num1 if alt => {
@@ -430,12 +430,10 @@ fn main() -> Result<(), MainErr> {
             // }
             // TODO: duplicate
             if !frame_buffer.forward() {
-                frame_buffer.try_append_and_jump_there::<MainErr, _>(|video_texture| {
+                frame_buffer.try_append_and_jump_there::<MainErr, _>(|(video_texture, pts)| {
                     if next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
                         update_frame_to_texture(&frame, video_texture)?;
-                        if let Some(t) = frame.pts() {
-                            pts = t;
-                        }
+                        *pts = frame.pts();
                         Ok(true)
                     } else {
                         Ok(false)
@@ -444,8 +442,11 @@ fn main() -> Result<(), MainErr> {
             }
         }
 
-        if let Some(video_texture) = frame_buffer.current() {
+        if let Some((video_texture, new_pts)) = frame_buffer.current() {
             canvas.copy(video_texture, None, affine(0, 0, width, height))?;
+            if let &Some(new_pts) = new_pts {
+                pts = new_pts;
+            }
         }
 
         if cursor_mode {
@@ -597,8 +598,7 @@ fn seek<'a>(
     stream_index: usize,
     decoder: &mut decoder::Video,
     frame: &mut frame::Video,
-    video_texture: &mut Texture,
-    pts: &mut i64,
+    frame_buffer: &mut RingBuffer<(Texture, Option<i64>)>,
 ) -> Result<FilteredPacketIter<'a>, MainErr> {
     let timestamp = match seek_target {
         SeekTarget::Milliseconds(time_ms) => {
@@ -620,10 +620,25 @@ fn seek<'a>(
     }
     let mut packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
     decoder.flush();
-    if next_frame(&mut packet_iterator, decoder, frame)? {
-        update_frame_to_texture(&*frame, video_texture)?;
-        if let Some(t) = frame.pts() {
-            *pts = t;
+    frame_buffer.clear();
+    while let Some((_, pts)) =
+        frame_buffer.try_append_and_jump_there::<MainErr, _>(|(video_texture, pts)| {
+            if next_frame(&mut packet_iterator, decoder, frame)? {
+                update_frame_to_texture(frame, video_texture)?;
+                *pts = frame.pts();
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })?
+    {
+        if let &Some(pts) = pts {
+            if timestamp < pts {
+                // The last decoded frame exceeds the seek target,
+                // so we should use the previous one
+                frame_buffer.backward();
+                break;
+            }
         }
     }
     Ok(packet_iterator)
@@ -680,13 +695,22 @@ impl<T> std::fmt::Debug for RingBuffer<T> {
 }
 
 impl<T> RingBuffer<T> {
-    fn try_new<E>(len: usize, gen: impl FnMut() -> Result<T, E>) -> Result<Self, E> {
+    fn try_new<E, F>(len: usize, gen: F) -> Result<Self, E>
+    where
+        F: FnMut() -> Result<T, E>,
+    {
         Ok(Self {
             elements: repeat_with(gen).take(len).collect::<Result<Vec<T>, E>>()?,
             start: 0,
             end: 0,
             cursor: 0,
         })
+    }
+
+    fn clear(&mut self) {
+        self.start = 0;
+        self.end = 0;
+        self.cursor = 0;
     }
 
     fn forward(&mut self) -> bool {
@@ -709,7 +733,7 @@ impl<T> RingBuffer<T> {
         }
     }
 
-    fn try_append_and_jump_there<E, F>(&mut self, f: F) -> Result<(), E>
+    fn try_append_and_jump_there<E, F>(&mut self, f: F) -> Result<Option<&T>, E>
     where
         F: FnOnce(&mut T) -> Result<bool, E>,
     {
@@ -719,8 +743,10 @@ impl<T> RingBuffer<T> {
             if self.end == self.start {
                 self.start = self.next_index(self.start);
             }
+            Ok(Some(&self.elements[self.cursor]))
+        } else {
+            Ok(None)
         }
-        Ok(())
     }
 
     fn current(&self) -> Option<&T> {
