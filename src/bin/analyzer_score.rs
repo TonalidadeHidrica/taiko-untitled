@@ -64,7 +64,11 @@ fn main() -> anyhow::Result<()> {
             if 48 % d > 0 && 64 % d > 0 {
                 bail!(
                     "Measure {}: {}/{} => {} {:?}",
-                    i, measure_length.0, measure_length.1, step_per_note, elements
+                    i,
+                    measure_length.0,
+                    measure_length.1,
+                    step_per_note,
+                    elements
                 );
             }
         }
@@ -90,20 +94,21 @@ fn main() -> anyhow::Result<()> {
                     }
                     beat += &step_per_note;
                 }
-                TjaElement::BpmChange(_) => {},
-                TjaElement::Measure(_, _) => {},
-                TjaElement::Scroll(_) => {},
+                TjaElement::BpmChange(_) => {}
+                TjaElement::Measure(_, _) => {}
+                TjaElement::Scroll(_) => {}
             }
         }
         if note_count == 0 {
             beat += &step_measure;
         }
     }
-    println!("{:?}", notes);
+    println!("{:?}", notes.len());
     Ok(())
 }
 
 #[derive(Clone, Debug)]
+#[allow(unused)]
 struct NoteScore {
     kind: SingleNoteKind,
     beat: BigRational,
