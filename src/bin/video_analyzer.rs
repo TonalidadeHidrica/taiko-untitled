@@ -12,7 +12,9 @@ use sdl2::keyboard::{Keycode, Mod};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::{Point, Rect};
 use sdl2::render::Texture;
+use serde::{Deserialize, Serialize};
 use std::cmp::max;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::iter::repeat_with;
 use std::path::PathBuf;
@@ -205,7 +207,10 @@ fn main() -> Result<(), MainErr> {
     let frame_id = -1; // TODO: remove this variable
     let mut texture_width = notes_texture.as_ref().map_or(1, |t| t.query().width);
     let mut draw_gauge = false;
-    let mut score_time_delta = config.get_float("score_time_delta").unwrap_or(0.0);
+    let mut score_time_deltas = config
+        .get::<ScoreTimeDeltas>("score_time_deltas")
+        .unwrap_or_default();
+    let mut score_time_delta = None;
     let mut show_score = true;
     let mut note_kind = None;
     let mut note_x = 500;
@@ -226,7 +231,13 @@ fn main() -> Result<(), MainErr> {
                     let alt = keymod.intersects(Mod::LALTMOD | Mod::RALTMOD);
                     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
                     match keycode {
-                        Keycode::Space => do_play = !do_play,
+                        Keycode::Space => {
+                            if shift {
+                                score_time_delta = None;
+                            } else {
+                                do_play = !do_play;
+                            }
+                        }
                         Keycode::Z => zoom_proportion += 1,
                         Keycode::X => zoom_proportion = max(1, zoom_proportion - 1),
                         Keycode::M => mouse_util.show_cursor(!mouse_util.is_cursor_showing()),
@@ -311,6 +322,7 @@ fn main() -> Result<(), MainErr> {
                             if !frame_buffer.backward() {
                                 packet_iterator = seek(
                                     SeekTarget::Timestamp(pts.saturating_sub(1)),
+                                    SeekMode::Precise,
                                     time_base,
                                     &mut input_context,
                                     stream_index,
@@ -321,7 +333,9 @@ fn main() -> Result<(), MainErr> {
                             }
                         }
                         Keycode::J | Keycode::K => {
-                            score_time_delta += match keycode {
+                            let d =
+                                score_time_delta.get_or_insert_with(|| score_time_deltas.get(pts));
+                            *d += match keycode {
                                 Keycode::J => -1.,
                                 _ => 1.,
                             } * match () {
@@ -335,12 +349,21 @@ fn main() -> Result<(), MainErr> {
                                 Keycode::PageUp => 1,
                                 _ => -1,
                             };
-                            let timestamp_delta = Rational::new(2, 1) / time_base;
-                            let target_timestamp = pts
-                                + sign
-                                    * (timestamp_delta.0 as f64 / timestamp_delta.1 as f64) as i64;
+                            let (timestamp_delta, seek_mode) = if shift {
+                                let mode = if sign > 0 {
+                                    SeekMode::NextKeyframe
+                                } else {
+                                    SeekMode::PreviousKeyframe
+                                };
+                                (1, mode)
+                            } else {
+                                let delta = Rational::new(2, 1) / time_base;
+                                let delta = delta.0 as f64 / delta.1 as f64;
+                                (delta as i64, SeekMode::Precise)
+                            };
                             packet_iterator = seek(
-                                SeekTarget::Timestamp(target_timestamp),
+                                SeekTarget::Timestamp(pts + sign * timestamp_delta),
+                                seek_mode,
                                 time_base,
                                 &mut input_context,
                                 stream_index,
@@ -384,6 +407,10 @@ fn main() -> Result<(), MainErr> {
                                 println!("Failed to load the config file: {:?}", e);
                             }
                             score = get_scores(config);
+                            match config.get("score_time_deltas") {
+                                Ok(s) => score_time_deltas = s,
+                                Err(e) => println!("Failed to update score_time_delta: {:?}", e),
+                            }
                         }
                         _ => {}
                     }
@@ -513,7 +540,8 @@ fn main() -> Result<(), MainErr> {
                     .map_err(debug_to_err())?;
             }
             if let (Some(score), true) = (&score, show_score) {
-                let time = f64::from(Rational::new(pts as i32, 1) * time_base) + score_time_delta;
+                let delta = score_time_delta.unwrap_or_else(|| score_time_deltas.get(pts));
+                let time = f64::from(Rational::new(pts as i32, 1) * time_base) + delta;
                 draw_game_notes(&mut canvas, &game_assets, time, score)
                     .map_err(|e| MainErr(format!("{:?}", e)))?;
             }
@@ -530,7 +558,9 @@ fn main() -> Result<(), MainErr> {
                 let ms = ms % 1000;
                 format!("{:02}:{:02}.{:03}", min, sec, ms)
             },
-            format!("score_time_delta = {:.4}", score_time_delta),
+            format!("({})", pts),
+            format!("delta configurated = {:.4?}", score_time_deltas.get(pts)),
+            format!("delta overwritten = {:.4?}", score_time_delta),
             // format!("YUV = {:?}",
             //     current_frame.and_then(|frame|
             //         (0..3).map(|i|
@@ -576,10 +606,17 @@ enum SeekTarget {
     #[allow(unused)]
     Milliseconds(i32),
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SeekMode {
+    Precise,
+    NextKeyframe,
+    PreviousKeyframe,
+}
 
 #[allow(clippy::too_many_arguments)]
 fn seek<'a>(
     seek_target: SeekTarget,
+    seek_mode: SeekMode,
     time_base: Rational,
     input_context: &'a mut format::context::Input,
     stream_index: usize,
@@ -594,12 +631,16 @@ fn seek<'a>(
         }
         SeekTarget::Timestamp(t) => t,
     };
+    let direction = match seek_mode {
+        SeekMode::Precise | SeekMode::PreviousKeyframe => AVSEEK_FLAG_BACKWARD,
+        SeekMode::NextKeyframe => 0,
+    };
     let res = unsafe {
         av_seek_frame(
             input_context.as_mut_ptr(),
             stream_index as _,
             timestamp,
-            AVSEEK_FLAG_BACKWARD,
+            direction,
         )
     };
     if res < 0 {
@@ -619,6 +660,9 @@ fn seek<'a>(
             }
         })?
     {
+        if seek_mode != SeekMode::Precise {
+            break;
+        }
         if let &Some(pts) = pts {
             if timestamp < pts {
                 // The last decoded frame exceeds the seek target,
@@ -808,4 +852,18 @@ fn get_scores(config: &Config) -> Option<Score> {
         .sort_by_key(|n| OrderedFloat::from(n.time));
 
     score_added.then(|| combined)
+}
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+struct ScoreTimeDeltas(BTreeMap<i64, f64>);
+impl ScoreTimeDeltas {
+    fn get(&self, pts: i64) -> f64 {
+        if let Some((_, &t)) = self.0.range(..=pts).last() {
+            t
+        } else if let Some((_, &t)) = self.0.range(..).next() {
+            t
+        } else {
+            0.0
+        }
+    }
 }
