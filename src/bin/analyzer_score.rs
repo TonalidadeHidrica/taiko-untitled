@@ -22,6 +22,9 @@ fn main() -> anyhow::Result<()> {
     let mut measure_length = (4u64, 4u64);
     let mut beat = BigRational::zero();
     let mut notes = vec![];
+    let mut scroll = 1.0;
+    let mut bpm = 125.0;
+    let mut hs = 1.0;
 
     let score = load_score(&opts.file)?;
     for (i, elements) in (1..).zip(score.iter()) {
@@ -75,7 +78,7 @@ fn main() -> anyhow::Result<()> {
 
         for element in elements {
             match element {
-                TjaElement::NoteChar(_, c) => {
+                TjaElement::NoteChar(i, c) => {
                     use taiko_untitled::structs::NoteColor::*;
                     use taiko_untitled::structs::NoteSize::*;
                     let kind = match c {
@@ -92,11 +95,14 @@ fn main() -> anyhow::Result<()> {
                             kind: SingleNoteKind { color, size },
                         });
                     }
+                    if let Some((Don, Large)) = kind {
+                        println!("{} {}", i, bpm * hs / 125.0);
+                    }
                     beat += &step_per_note;
                 }
-                TjaElement::BpmChange(_) => {}
+                &TjaElement::BpmChange(b) => bpm = b,
                 TjaElement::Measure(_, _) => {}
-                TjaElement::Scroll(_) => {}
+                &TjaElement::Scroll(s) => hs = s,
             }
         }
         if note_count == 0 {

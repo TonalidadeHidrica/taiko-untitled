@@ -400,7 +400,7 @@ fn main() -> Result<(), MainErr> {
                         }
                         Keycode::Slash if shift => {
                             let time = f64::from(Rational::new(pts as i32, 1) * time_base);
-                            println!("{:.3} {}", time, note_x);
+                            println!("{:.10} {}", time, note_x);
                         }
                         Keycode::Q => {
                             if let Err(e) = config.refresh() {
