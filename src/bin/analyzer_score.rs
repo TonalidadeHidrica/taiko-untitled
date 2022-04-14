@@ -23,8 +23,17 @@ fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
 
     for path in &opts.paths {
-        let (bpm, _notes) = load_score(&path)?;
-        println!("bpm = {:?}", bpm);
+        let (bpm, notes) = load_score(&path)?;
+        let bpm_ratio = BigRational::from_float(bpm.0).context("Convert BPM to ratio")?;
+        let ratio = &bpm_ratio / BigRational::from_integer(BigInt::from(125));
+        println!("bpm = {:?} = {:?} => {:?}", bpm, bpm_ratio, ratio);
+        let notes = notes
+            .into_iter()
+            .map(|note| NoteScore {
+                beat: note.beat / &ratio * BigRational::from_integer(BigInt::from(4)),
+                ..note
+            })
+            .collect_vec();
     }
     Ok(())
 }
