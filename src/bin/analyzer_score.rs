@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fmt::Debug,
     path::{Path, PathBuf},
 };
@@ -8,7 +9,8 @@ use chardetng::EncodingDetector;
 use clap::Parser;
 use itertools::Itertools;
 
-use num::{BigInt, BigRational, Zero};
+use num::{range_step_inclusive, BigInt, BigRational, Integer, One, ToPrimitive, Zero};
+use ordered_float::NotNan;
 use taiko_untitled::{
     structs::{Bpm, SingleNoteKind},
     tja::ParseFirst,
@@ -22,19 +24,78 @@ struct Opts {
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
 
+    let mut notes_map = BTreeMap::<_, Vec<_>>::new();
     for path in &opts.paths {
         let (bpm, notes) = load_score(&path)?;
         let bpm_ratio = BigRational::from_float(bpm.0).context("Convert BPM to ratio")?;
         let ratio = &bpm_ratio / BigRational::from_integer(BigInt::from(125));
-        println!("bpm = {:?} = {:?} => {:?}", bpm, bpm_ratio, ratio);
-        let notes = notes
-            .into_iter()
-            .map(|note| NoteScore {
-                beat: note.beat / &ratio * BigRational::from_integer(BigInt::from(4)),
-                ..note
-            })
-            .collect_vec();
+        // println!("bpm = {:?} = {:?} => {:?}", bpm, bpm_ratio, ratio);
+        for note in notes.into_iter().map(|note| NoteScore {
+            beat: note.beat / &ratio * BigRational::from_integer(BigInt::from(4)),
+            ..note
+        }) {
+            notes_map.entry(note.beat.clone()).or_default().push(note);
+        }
     }
+    let notes_map = notes_map;
+
+    let last_beat = notes_map.range(..).last().unwrap().0.ceil();
+    let mut current_scroll = 1.0;
+    let mut line_first = true;
+    for i in range_step_inclusive(BigRational::zero(), last_beat, BigRational::one()) {
+        let notes = notes_map
+            .range(i.clone()..i.clone() + BigRational::one())
+            .map(|v| (v.0 - i.clone(), v.1))
+            .collect_vec();
+        let lcm = notes
+            .iter()
+            .map(|v| v.0.denom())
+            .fold(BigInt::one(), |x, y| x.lcm(y));
+        let mut slots = vec![None; lcm.clone().to_usize().unwrap()];
+        for (beat, notes) in notes {
+            let index = (beat * lcm.clone()).to_usize().unwrap();
+            let note = notes.iter().min_by_key(|n| n.scroll).unwrap();
+            slots[index] = Some((note.scroll, note.kind));
+        }
+        if !line_first {
+            println!();
+            line_first = true;
+        }
+        if (i % BigRational::from_integer(BigInt::from(8))).is_zero() {
+            println!("#BARLINEON");
+        } else {
+            println!("#BARLINEOFF");
+        }
+        for slot in slots {
+            let c = match slot {
+                None => '0',
+                Some((scroll, kind)) => {
+                    if current_scroll != *scroll {
+                        current_scroll = *scroll;
+                        if !line_first {
+                            println!();
+                            // line_first = true;
+                        }
+                        println!("#SCROLL {}", *scroll / 125.);
+                    }
+                    use taiko_untitled::structs::NoteColor::*;
+                    use taiko_untitled::structs::NoteSize::*;
+                    match (kind.color, kind.size) {
+                        (Don, Small) => '1',
+                        (Ka, Small) => '2',
+                        (Don, Large) => '3',
+                        (Ka, Large) => '4',
+                    }
+                }
+            };
+            print!("{}", c);
+            line_first = false;
+        }
+        print!(",");
+        line_first = false;
+    }
+    println!("#END");
+
     Ok(())
 }
 
@@ -43,7 +104,7 @@ fn main() -> anyhow::Result<()> {
 struct NoteScore {
     kind: SingleNoteKind,
     beat: BigRational,
-    scroll: f64,
+    scroll: NotNan<f64>,
     line: usize,
 }
 
@@ -129,7 +190,7 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<(Bpm, Vec<NoteS
                         notes.push(NoteScore {
                             beat: beat.clone(),
                             kind: SingleNoteKind { color, size },
-                            scroll: bpm.0 * hs,
+                            scroll: NotNan::new(bpm.0 * hs)?,
                             line: i,
                         });
                     }
