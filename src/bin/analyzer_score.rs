@@ -9,25 +9,51 @@ use clap::Parser;
 use itertools::Itertools;
 
 use num::{BigInt, BigRational, Zero};
-use taiko_untitled::{structs::SingleNoteKind, tja::ParseFirst};
+use taiko_untitled::{
+    structs::{Bpm, SingleNoteKind},
+    tja::ParseFirst,
+};
 
 #[derive(Parser)]
 struct Opts {
-    file: PathBuf,
+    paths: Vec<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
 
+    for path in &opts.paths {
+        let (bpm, _notes) = load_score(&path)?;
+        println!("bpm = {:?}", bpm);
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+#[allow(unused)]
+struct NoteScore {
+    kind: SingleNoteKind,
+    beat: BigRational,
+    scroll: f64,
+    line: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TjaElement {
+    NoteChar(usize, char),
+    BpmChange(f64),
+    Measure(f64, f64),
+    Scroll(f64),
+}
+
+fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<(Bpm, Vec<NoteScore>)> {
     let mut measure_length = (4u64, 4u64);
     let mut beat = BigRational::zero();
     let mut notes = vec![];
-    let mut scroll = 1.0;
-    let mut bpm = 125.0;
     let mut hs = 1.0;
 
-    let score = load_score(&opts.file)?;
-    for (i, elements) in (1..).zip(score.iter()) {
+    let (mut bpm, score) = parse_score(&path)?;
+    for (_measure_index, elements) in (1..).zip(score.iter()) {
         let measure_elems = elements
             .iter()
             .enumerate()
@@ -61,22 +87,8 @@ fn main() -> anyhow::Result<()> {
             .count();
         let step_measure = BigRational::new(measure_length.0.into(), measure_length.1.into());
         let step_per_note = &step_measure / &BigInt::from(note_count.max(1));
-        {
-            let d = u64::try_from(step_per_note.denom()).context("Too large denominator")?;
-            // divisor of 48 or 64
-            if 48 % d > 0 && 64 % d > 0 {
-                bail!(
-                    "Measure {}: {}/{} => {} {:?}",
-                    i,
-                    measure_length.0,
-                    measure_length.1,
-                    step_per_note,
-                    elements
-                );
-            }
-        }
 
-        for element in elements {
+        for &element in elements {
             match element {
                 TjaElement::NoteChar(i, c) => {
                     use taiko_untitled::structs::NoteColor::*;
@@ -90,46 +102,45 @@ fn main() -> anyhow::Result<()> {
                         _ => bail!("Unknown note char"),
                     };
                     if let Some((color, size)) = kind {
+                        {
+                            let d = u64::try_from(beat.denom()).context("Too large denominator")?;
+                            // divisor of 48 or 64
+                            if 48 % d > 0 && 64 % d > 0 {
+                                bail!(
+                                    "File {:?} Line {}: {}/{} => {} {:?}",
+                                    path,
+                                    i,
+                                    measure_length.0,
+                                    measure_length.1,
+                                    step_per_note,
+                                    elements
+                                );
+                            }
+                        }
                         notes.push(NoteScore {
                             beat: beat.clone(),
                             kind: SingleNoteKind { color, size },
+                            scroll: bpm.0 * hs,
+                            line: i,
                         });
-                    }
-                    if let Some((Don, Large)) = kind {
-                        println!("{} {}", i, bpm * hs / 125.0);
                     }
                     beat += &step_per_note;
                 }
-                &TjaElement::BpmChange(b) => bpm = b,
+                TjaElement::BpmChange(b) => bpm = Bpm(b),
                 TjaElement::Measure(_, _) => {}
-                &TjaElement::Scroll(s) => hs = s,
+                TjaElement::Scroll(s) => hs = s,
             }
         }
         if note_count == 0 {
             beat += &step_measure;
         }
     }
-    println!("{:?}", notes.len());
-    Ok(())
-}
 
-#[derive(Clone, Debug)]
-#[allow(unused)]
-struct NoteScore {
-    kind: SingleNoteKind,
-    beat: BigRational,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum TjaElement {
-    NoteChar(usize, char),
-    BpmChange(f64),
-    Measure(f64, f64),
-    Scroll(f64),
+    Ok((bpm, notes))
 }
 
 #[allow(clippy::if_same_then_else)]
-fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<Vec<Vec<TjaElement>>> {
+fn parse_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<(Bpm, Vec<Vec<TjaElement>>)> {
     let buf = fs_err::read(&path)?;
     let mut detector = EncodingDetector::new();
     detector.feed(&buf, true);
@@ -139,6 +150,15 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<Vec<Vec<TjaElem
         bail!("Failed to decode {:?}", path);
     }
     let mut lines = (1..).zip(source.lines());
+
+    let bpm = lines
+        .find_map(|(_, line)| {
+            let bpm = line.strip_prefix("BPM:")?;
+            let bpm = bpm.parse_first()?;
+            (bpm > 0.0).then(|| Bpm(bpm))
+        })
+        .context("BPM not found")?;
+
     lines.by_ref().find(|x| x.1.starts_with("#START"));
 
     let mut elements_buffer = vec![];
@@ -212,5 +232,5 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<Vec<Vec<TjaElem
         }
     }
 
-    Ok(measures)
+    Ok((bpm, measures))
 }
