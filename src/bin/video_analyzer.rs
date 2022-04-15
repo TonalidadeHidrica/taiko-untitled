@@ -561,6 +561,7 @@ fn main() -> Result<(), MainErr> {
             format!("({})", pts),
             format!("delta configurated = {:.4?}", score_time_deltas.get(pts)),
             format!("delta overwritten = {:.4?}", score_time_delta),
+            format!("note_x = {}", note_x),
             // format!("YUV = {:?}",
             //     current_frame.and_then(|frame|
             //         (0..3).map(|i|
@@ -574,21 +575,15 @@ fn main() -> Result<(), MainErr> {
             let text_width = text_surface.width();
             let text_height = text_surface.height();
             let text_texture = texture_creator.create_texture_from_surface(text_surface)?;
-            // canvas.copy(
-            //     &text_texture,
-            //     None,
-            //     Some(Rect::new(0, 0, text_width, text_height)),
-            // )?;
-            canvas.copy(
-                &text_texture,
-                None,
-                Some(Rect::new(
-                    (width - text_width) as i32,
-                    current_top,
-                    text_width,
-                    text_height,
-                )),
-            )?;
+            let rect = Rect::new(
+                (width - text_width) as i32,
+                current_top,
+                text_width,
+                text_height,
+            );
+            canvas.set_draw_color(Color::BLACK);
+            canvas.fill_rect(rect)?;
+            canvas.copy(&text_texture, None, rect)?;
             current_top += (text_height as f64 * 1.2) as i32;
         }
 
