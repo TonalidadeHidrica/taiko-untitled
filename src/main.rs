@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use taiko_untitled::assets::Assets;
 use taiko_untitled::errors::{
     new_config_error, new_sdl_canvas_error, new_sdl_error, new_sdl_window_error, TaikoError,
@@ -10,10 +11,13 @@ fn main() -> Result<(), TaikoError> {
     let config = taiko_untitled::config::get_config()
         .map_err(|e| new_config_error("Failed to load configuration", e))?;
 
-    let tja_file_name = std::env::args().nth(1).ok_or_else(|| TaikoError {
-        message: "Input file is not specified".to_owned(),
-        cause: TaikoErrorCause::None,
-    })?;
+    let tja_file_names = std::env::args().skip(1).collect_vec();
+    if tja_file_names.is_empty() {
+        return Err(TaikoError {
+            message: "Input file is not specified".to_owned(),
+            cause: TaikoErrorCause::None,
+        });
+    }
 
     let sdl_context =
         sdl2::init().map_err(|s| new_sdl_error("Failed to initialize SDL context", s))?;
@@ -82,7 +86,7 @@ fn main() -> Result<(), TaikoError> {
                 &mut timer_subsystem,
                 &audio_manager,
                 &mut assets,
-                &tja_file_name,
+                &tja_file_names,
             )?,
             GameMode::Exit => break,
         }

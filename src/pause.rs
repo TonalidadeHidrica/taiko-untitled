@@ -72,11 +72,16 @@ pub fn pause(
     audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
     file_change_receiver: &Receiver<notify::DebouncedEvent>,
-    song: &Song,
+    songs: &[Song],
     mut game_user_state: GameUserState,
 ) -> Result<PauseBreak, TaikoError> {
-    let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
-    let score = PausedScore::new(score);
+    let scores = songs
+        .iter()
+        .map(|song| {
+            let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
+            Ok(PausedScore::new(score))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     audio_manager.pause()?;
 
@@ -92,7 +97,7 @@ pub fn pause(
             canvas,
             event_pump,
             assets,
-            &score,
+            &scores,
             &mut music_position,
             &mut branch,
             &mut game_user_state,
@@ -112,7 +117,7 @@ fn pause_loop<E>(
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
     assets: &mut Assets,
-    score: &PausedScore,
+    scores: &[PausedScore],
     music_position: &mut E,
     branch: &mut ValueWithUpdateTime<BranchAnimationState>,
     game_user_state: &mut GameUserState,
@@ -120,6 +125,7 @@ fn pause_loop<E>(
 where
     E: EasingF64,
 {
+    assert!(!scores.is_empty());
     for event in event_pump.poll_iter() {
         match event {
             Event::Quit { .. } => return Ok(Some(PauseBreak::Exit)),
@@ -136,28 +142,28 @@ where
                 }
                 Keycode::F1 => game_user_state.auto = !game_user_state.auto,
                 Keycode::PageDown => music_position.set_with(|x| {
-                    score
+                    scores[0]
                         .measure_scroll_points
                         .range(..OrderedFloat::from(x - 1e-3))
                         .next_back()
                         .map_or(x, |x| **x)
                 }),
                 Keycode::PageUp => music_position.set_with(|x| {
-                    score
+                    scores[0]
                         .measure_scroll_points
                         .range(OrderedFloat::from(x + 1e-3)..)
                         .next()
                         .map_or(x, |x| **x)
                 }),
                 Keycode::Left => music_position.set_with(|x| {
-                    score
+                    scores[0]
                         .beat_scroll_points
                         .range(..OrderedFloat::from(x - 1e-3))
                         .next_back()
                         .map_or(x, |x| **x)
                 }),
                 Keycode::Right => music_position.set_with(|x| {
-                    score
+                    scores[0]
                         .beat_scroll_points
                         .range(OrderedFloat::from(x + 1e-3)..)
                         .next()
@@ -191,20 +197,22 @@ where
             &branch.get(),
         )?;
 
-        let bar_lines = score
-            .score
-            .bar_lines
-            .iter()
-            .filter(|x| branch.get().get().matches(x.branch));
-        draw_bar_lines(canvas, display_position, bar_lines)?;
+        for (offset_y, score) in (0..).step_by(300).zip(scores) {
+            let bar_lines = score
+                .score
+                .bar_lines
+                .iter()
+                .filter(|x| branch.get().get().matches(x.branch));
+            draw_bar_lines(canvas, display_position, bar_lines)?;
 
-        let notes = score
-            .score
-            .notes
-            .iter()
-            .rev()
-            .filter(|x| branch.get().get().matches(x.branch));
-        draw_notes(canvas, assets, display_position, notes)?;
+            let notes = score
+                .score
+                .notes
+                .iter()
+                .rev()
+                .filter(|x| branch.get().get().matches(x.branch));
+            draw_notes(canvas, assets, display_position, notes)?;
+        }
     }
     canvas.set_clip_rect(None);
 
