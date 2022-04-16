@@ -16,13 +16,20 @@ pub fn game_rect() -> Rect {
     Rect::new(498, 288, 1422, 195)
 }
 
-pub fn draw_background(canvas: &mut WindowCanvas, assets: &Assets) -> Result<(), SdlError> {
+pub fn clear_background(canvas: &mut WindowCanvas) {
     canvas.set_draw_color(Color::RGBA(20, 20, 20, 0));
     canvas.clear();
+}
+
+pub fn draw_background(
+    canvas: &mut WindowCanvas,
+    assets: &Assets,
+    offset_y: i32,
+) -> Result<(), SdlError> {
     canvas.copy(
         &assets.textures.background,
         None,
-        Some(Rect::new(0, 0, 1920, 1080)),
+        shift_rect((0, offset_y), Rect::new(0, 0, 1920, 1080)),
     )?;
     Ok(())
 }
@@ -60,6 +67,7 @@ pub fn draw_branch_overlay(
     music_position: f64,
     score_rect: Rect,
     bs: &BranchAnimationState,
+    offset_y: i32,
 ) -> Result<(), TaikoError> {
     // TODO color for master course is wrong
     canvas.set_blend_mode(sdl2::render::BlendMode::Add);
@@ -69,7 +77,7 @@ pub fn draw_branch_overlay(
         clamp((music_position - bs.switch_time) * 60.0 / 20.0, 0.0, 1.0),
     ));
     canvas
-        .fill_rect(score_rect)
+        .fill_rect(shift_rect((0, offset_y), score_rect))
         .map_err(|e| new_sdl_error("Failed to draw branch overlay", e))?;
     canvas.set_blend_mode(sdl2::render::BlendMode::None);
     Ok(())
@@ -87,6 +95,7 @@ pub fn draw_bar_lines<'a, I>(
     canvas: &mut WindowCanvas,
     music_position: f64,
     bar_lines: I,
+    offset_y: i32,
 ) -> Result<(), TaikoError>
 where
     I: Iterator<Item = &'a BarLine>,
@@ -95,7 +104,8 @@ where
     for bar_line in bar_lines {
         let x = get_x(music_position, bar_line.time, bar_line.scroll_speed) as i32;
         if (0..=2000).contains(&x) {
-            sorted_bar_lines[bar_line.kind].push(Rect::new(x + 96, 288, 3, 195));
+            sorted_bar_lines[bar_line.kind]
+                .push(shift_rect((0, offset_y), Rect::new(x + 96, 288, 3, 195)));
         }
     }
     for (kind, rects) in sorted_bar_lines {
@@ -115,6 +125,7 @@ pub fn draw_notes<I, N>(
     assets: &Assets,
     music_position: f64,
     notes: I,
+    offset_y: i32,
 ) -> Result<(), TaikoError>
 where
     I: Iterator<Item = N>,
@@ -125,7 +136,7 @@ where
         match note.content {
             NoteContent::Single(single_note) => {
                 let x = get_x(music_position, note.time, note.scroll_speed);
-                draw_note(canvas, assets, &single_note.kind, x as i32, 288)?;
+                draw_note(canvas, assets, &single_note.kind, x as i32, 288 + offset_y)?;
             }
             NoteContent::Renda(RendaContent {
                 end_time,
@@ -146,18 +157,25 @@ where
                     .copy(
                         texture_right,
                         Rect::new(97, 0, 195 - 97, 195),
-                        Rect::new(xt + 97, 288, 195 - 97, 195),
+                        shift_rect((0, offset_y), Rect::new(xt + 97, 288, 195 - 97, 195)),
                     )
                     .map_err(|e| new_sdl_error("Failed to draw renda right", e))?;
                 canvas
                     .copy(
                         texture_right,
                         Rect::new(0, 0, 97, 195),
-                        Rect::new(xs + 97, 288, (xt - xs) as u32, 195),
+                        shift_rect(
+                            (0, offset_y),
+                            Rect::new(xs + 97, 288, (xt - xs) as u32, 195),
+                        ),
                     )
                     .map_err(|e| new_sdl_error("Failed to draw renda center", e))?;
                 canvas
-                    .copy(texture_left, None, Rect::new(xs, 288, 195, 195))
+                    .copy(
+                        texture_left,
+                        None,
+                        shift_rect((0, offset_y), Rect::new(xs, 288, 195, 195)),
+                    )
                     .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
             }
             NoteContent::Renda(RendaContent {
@@ -171,7 +189,7 @@ where
                     .copy(
                         &assets.textures.renda_left,
                         None,
-                        Rect::new(x, 288, 195, 195),
+                        shift_rect((0, offset_y), Rect::new(x, 288, 195, 195)),
                     )
                     .map_err(|e| new_sdl_error("Failed to draw renda left", e))?;
             }
@@ -207,6 +225,7 @@ pub fn draw_flying_notes<'a, I>(
     assets: &Assets,
     music_position: f64,
     notes: I,
+    offset_y: i32,
 ) -> Result<(), TaikoError>
 where
     I: Iterator<Item = &'a FlyingNote>,
@@ -219,7 +238,7 @@ where
             let x = 521.428 + 19.4211 * t + 1.75748 * t * t - 0.035165 * t * t * t;
             let y = 288.4 - 44.303 * t + 0.703272 * t * t + 0.0368848 * t * t * t
                 - 0.000542067 * t * t * t * t;
-            draw_note(canvas, assets, &note.kind, x as i32, y as i32)?;
+            draw_note(canvas, assets, &note.kind, x as i32, y as i32 + offset_y)?;
         }
     }
     Ok(())
@@ -230,6 +249,7 @@ pub fn draw_judge_strs<'a, I>(
     assets: &mut Assets,
     music_position: f64,
     judge_strs: I,
+    offset_y: i32,
 ) -> Result<(), TaikoError>
 where
     I: Iterator<Item = &'a JudgeStr>,
@@ -249,7 +269,11 @@ where
         };
         texture.set_alpha_mod((a * 255.0) as u8);
         canvas
-            .copy(texture, None, Some(Rect::new(552, y as i32, 135, 90)))
+            .copy(
+                texture,
+                None,
+                shift_rect((0, offset_y), Rect::new(552, y as i32, 135, 90)),
+            )
             .map_err(|e| new_sdl_error("Failed to draw judge str", e))?;
     }
     Ok(())
@@ -260,6 +284,7 @@ pub fn draw_combo(
     textures: &[Texture],
     seconds_after_update: f64,
     digits: Vec<u32>,
+    offset_y: i32,
 ) -> Result<(), TaikoError> {
     let w = (52.0 * digits.len() as f64).min(44.0 * 4.0);
     let x = 399.0 - w / 2.0;
@@ -278,7 +303,7 @@ pub fn draw_combo(
             (77.0 + yd) as u32,
         );
         canvas
-            .copy(t, None, rect)
+            .copy(t, None, shift_rect((0, offset_y), rect))
             .map_err(|e| new_sdl_error("Failed to draw combo number", e))?;
     }
     Ok(())
@@ -290,16 +315,20 @@ pub fn draw_gauge(
     gauge: u32,
     clear_count: u32,
     all_count: u32,
+    offset_y: i32,
 ) -> Result<(), String> {
     canvas.copy(
         &assets.textures.gauge_left_base,
         None,
-        Rect::new(726, 204, 1920, 78),
+        shift_rect((0, offset_y), Rect::new(726, 204, 1920, 78)),
     )?;
     canvas.copy(
         &assets.textures.gauge_right_base,
         None,
-        Rect::new(726 + clear_count as i32 * 21, 204, 1920, 78),
+        shift_rect(
+            (0, offset_y),
+            Rect::new(726 + clear_count as i32 * 21, 204, 1920, 78),
+        ),
     )?;
 
     let gauge_count = clamp(gauge, 0, clear_count);
@@ -307,7 +336,10 @@ pub fn draw_gauge(
     canvas.copy(
         &assets.textures.gauge_left_red,
         src,
-        Rect::new(738, 204, src.width(), src.height()),
+        shift_rect(
+            (0, offset_y),
+            Rect::new(738, 204, src.width(), src.height()),
+        ),
     )?;
 
     let src = Rect::new(
@@ -319,7 +351,10 @@ pub fn draw_gauge(
     canvas.copy(
         &assets.textures.gauge_left_dark,
         src,
-        Rect::new(738 + src.x(), 204, src.width(), src.height()),
+        shift_rect(
+            (0, offset_y),
+            Rect::new(738 + src.x(), 204, src.width(), src.height()),
+        ),
     )?;
 
     let max_width = 21 * (all_count - clear_count) - 6;
@@ -328,11 +363,14 @@ pub fn draw_gauge(
     canvas.copy(
         &assets.textures.gauge_right_yellow,
         src,
-        Rect::new(
-            738 + clear_count as i32 * 21,
-            204,
-            src.width(),
-            src.height(),
+        shift_rect(
+            (0, offset_y),
+            Rect::new(
+                738 + clear_count as i32 * 21,
+                204,
+                src.width(),
+                src.height(),
+            ),
         ),
     )?;
 
@@ -345,18 +383,21 @@ pub fn draw_gauge(
     canvas.copy(
         &assets.textures.gauge_right_dark,
         src,
-        Rect::new(
-            738 + clear_count as i32 * 21 + src.x(),
-            204,
-            src.width(),
-            src.height(),
+        shift_rect(
+            (0, offset_y),
+            Rect::new(
+                738 + clear_count as i32 * 21 + src.x(),
+                204,
+                src.width(),
+                src.height(),
+            ),
         ),
     )?;
 
     canvas.copy(
         &assets.textures.gauge_soul,
         None,
-        Rect::new(1799, 215, 71, 63),
+        shift_rect((0, offset_y), Rect::new(1799, 215, 71, 63)),
     )?;
     Ok(())
 }
@@ -381,4 +422,10 @@ fn interpolate_color(color_zero: Color, color_one: Color, t: f64) -> Color {
 fn get_x(music_position: f64, time: f64, scroll_speed: Bpm) -> f64 {
     let diff = time - music_position;
     522.5 + 1422.0 / 4.0 * diff / scroll_speed.beat_duration()
+}
+
+pub fn shift_rect(delta: (i32, i32), mut rect: Rect) -> Rect {
+    rect.x += delta.0;
+    rect.y += delta.1;
+    rect
 }

@@ -18,11 +18,13 @@ use crate::errors::to_sdl_error;
 use crate::errors::TaikoError;
 use crate::game::AutoEvent;
 use crate::game::GameUserState;
+use crate::game_graphics::clear_background;
 use crate::game_graphics::draw_background;
 use crate::game_graphics::draw_bar_lines;
 use crate::game_graphics::draw_branch_overlay;
 use crate::game_graphics::draw_notes;
 use crate::game_graphics::game_rect;
+use crate::game_graphics::shift_rect;
 use crate::game_graphics::BranchAnimationState;
 use crate::structs::just::Score;
 use crate::structs::BranchType;
@@ -186,24 +188,29 @@ where
 
     let display_position = music_position.get_eased();
 
-    draw_background(canvas, assets).map_err(to_sdl_error("While drawing background"))?;
-    let rect = game_rect();
-    canvas.set_clip_rect(rect);
-    {
-        draw_branch_overlay(
-            canvas,
-            branch.duration_since_update().as_secs_f64(),
-            rect,
-            &branch.get(),
-        )?;
+    clear_background(canvas);
 
-        for (offset_y, score) in (0..).step_by(300).zip(scores) {
+    for (offset_y, score) in (0..).step_by(300).zip(scores) {
+        draw_background(canvas, assets, offset_y)
+            .map_err(to_sdl_error("While drawing background"))?;
+
+        let rect = game_rect();
+        canvas.set_clip_rect(shift_rect((0, offset_y), rect));
+        {
+            draw_branch_overlay(
+                canvas,
+                branch.duration_since_update().as_secs_f64(),
+                rect,
+                &branch.get(),
+                offset_y,
+            )?;
+
             let bar_lines = score
                 .score
                 .bar_lines
                 .iter()
                 .filter(|x| branch.get().get().matches(x.branch));
-            draw_bar_lines(canvas, display_position, bar_lines)?;
+            draw_bar_lines(canvas, display_position, bar_lines, offset_y)?;
 
             let notes = score
                 .score
@@ -211,10 +218,10 @@ where
                 .iter()
                 .rev()
                 .filter(|x| branch.get().get().matches(x.branch));
-            draw_notes(canvas, assets, display_position, notes)?;
+            draw_notes(canvas, assets, display_position, notes, offset_y)?;
         }
+        canvas.set_clip_rect(None);
     }
-    canvas.set_clip_rect(None);
 
     canvas.present();
     if !config.window.vsync {

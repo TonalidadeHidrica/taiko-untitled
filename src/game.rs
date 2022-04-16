@@ -4,11 +4,11 @@ use crate::audio::{AudioManager, SoundEffectSchedule};
 use crate::config::TaikoConfig;
 use crate::errors::no_score_in_tja;
 use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError};
-use crate::game_graphics::game_rect;
 use crate::game_graphics::{
     draw_background, draw_bar_lines, draw_branch_overlay, draw_combo, draw_flying_notes,
-    draw_gauge, draw_judge_strs, draw_notes,
+    draw_gauge, draw_judge_strs, draw_notes, clear_background,
 };
+use crate::game_graphics::{game_rect, shift_rect};
 use crate::game_manager::{GameManager, OfGameState};
 use crate::mode::GameMode;
 use crate::pause::pause;
@@ -323,6 +323,8 @@ fn game_loop(
         ))?;
     }
 
+    clear_background(canvas);
+
     for (score, game_manager, offset_y) in
         izip!(scores, game_managers.iter_mut(), (0..).step_by(300))
     {
@@ -352,40 +354,48 @@ fn draw_game_to_canvas(
     music_position: Option<f64>,
     offset_y: i32,
 ) -> Result<(), TaikoError> {
-    draw_background(canvas, assets).map_err(to_sdl_error("While drawing background"))?;
+    draw_background(canvas, assets, offset_y).map_err(to_sdl_error("While drawing background"))?;
 
     let gauge = game_manager.game_state.gauge;
     let gauge = clamp(gauge, 0.0, 10000.0) as u32 / 200;
-    draw_gauge(canvas, assets, gauge, 39, 50).map_err(|e| new_sdl_error("Failed to drawr", e))?;
+    draw_gauge(canvas, assets, gauge, 39, 50, offset_y)
+        .map_err(|e| new_sdl_error("Failed to drawr", e))?;
 
     if let Some(music_position) = music_position {
         let score_rect = game_rect();
-        canvas.set_clip_rect(score_rect);
+        canvas.set_clip_rect(shift_rect((0, offset_y), score_rect));
         {
             draw_branch_overlay(
                 canvas,
                 music_position,
                 score_rect,
                 &game_manager.animation_state.branch_state,
+                offset_y,
             )?;
 
             let bar_lines =
                 BarLineIterator::new(game_manager.score.branches.iter(), score.bar_lines.iter());
-            draw_bar_lines(canvas, music_position, bar_lines)?;
+            draw_bar_lines(canvas, music_position, bar_lines, offset_y)?;
 
-            draw_game_notes(canvas, assets, music_position, &game_manager.score)?;
+            draw_game_notes(
+                canvas,
+                assets,
+                music_position,
+                &game_manager.score,
+                offset_y,
+            )?;
         }
         canvas.set_clip_rect(None);
 
         let flying_notes = game_manager
             .flying_notes(|note| note.time <= music_position - 0.5) // TODO incomplete refactor
             .rev();
-        draw_flying_notes(canvas, assets, music_position, flying_notes)?;
+        draw_flying_notes(canvas, assets, music_position, flying_notes, offset_y)?;
 
         let judge_strs = game_manager
             .judge_strs(|judge| (music_position - judge.time) * 60.0 >= 18.0)
             .rev();
-        draw_judge_strs(canvas, assets, music_position, judge_strs)?;
+        draw_judge_strs(canvas, assets, music_position, judge_strs, offset_y)?;
 
         let combo = game_manager.game_state.combo;
         if let Some(textures) = match () {
@@ -401,7 +411,7 @@ fn draw_game_to_canvas(
                     .expect("i64 cannot be converted to u64 only if it's negative"),
             );
             let time = music_position - game_manager.animation_state.last_combo_update;
-            draw_combo(canvas, textures, time, digits)?;
+            draw_combo(canvas, textures, time, digits, offset_y)?;
         }
     }
     Ok(())
@@ -508,6 +518,7 @@ pub fn draw_game_notes(
     assets: &Assets,
     music_position: f64,
     score: &ScoreOfGameState,
+    offset_y: i32,
 ) -> Result<(), TaikoError> {
     let mut branches = score.branches.iter().rev().peekable();
     let notes = score.notes.iter().rev();
@@ -561,7 +572,7 @@ pub fn draw_game_notes(
         })
     });
 
-    draw_notes(canvas, assets, music_position, notes)
+    draw_notes(canvas, assets, music_position, notes, offset_y)
 }
 
 fn process_key_event(
