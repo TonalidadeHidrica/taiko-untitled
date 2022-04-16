@@ -6,6 +6,7 @@ use crate::structs::{
     BarLine, BarLineKind, Bpm, BranchType, NoteColor, NoteSize, SingleNoteKind,
 };
 use enum_map::EnumMap;
+use itertools::iterate;
 use num::clamp;
 use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
@@ -428,4 +429,9 @@ pub fn shift_rect(delta: (i32, i32), mut rect: Rect) -> Rect {
     rect.x += delta.0;
     rect.y += delta.1;
     rect
+}
+
+pub fn get_offsets_rev(n: usize) -> impl Iterator<Item = i32> {
+    let (start, step) = if n <= 3 { (0, 320) } else { (-200, 320) };
+    iterate(start + step * (n as i32 - 1), move |x| x - step).take(n)
 }

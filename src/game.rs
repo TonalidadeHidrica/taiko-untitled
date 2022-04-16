@@ -5,8 +5,8 @@ use crate::config::TaikoConfig;
 use crate::errors::no_score_in_tja;
 use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError};
 use crate::game_graphics::{
-    draw_background, draw_bar_lines, draw_branch_overlay, draw_combo, draw_flying_notes,
-    draw_gauge, draw_judge_strs, draw_notes, clear_background,
+    clear_background, draw_background, draw_bar_lines, draw_branch_overlay, draw_combo,
+    draw_flying_notes, draw_gauge, draw_judge_strs, draw_notes, get_offsets_rev,
 };
 use crate::game_graphics::{game_rect, shift_rect};
 use crate::game_manager::{GameManager, OfGameState};
@@ -325,9 +325,11 @@ fn game_loop(
 
     clear_background(canvas);
 
-    for (score, game_manager, offset_y) in
-        izip!(scores, game_managers.iter_mut(), (0..).step_by(300))
-    {
+    for (score, game_manager, offset_y) in izip!(
+        scores.iter().rev(),
+        game_managers.iter_mut().rev(),
+        get_offsets_rev(scores.len()),
+    ) {
         draw_game_to_canvas(
             canvas,
             assets,

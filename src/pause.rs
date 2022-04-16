@@ -24,6 +24,7 @@ use crate::game_graphics::draw_bar_lines;
 use crate::game_graphics::draw_branch_overlay;
 use crate::game_graphics::draw_notes;
 use crate::game_graphics::game_rect;
+use crate::game_graphics::get_offsets_rev;
 use crate::game_graphics::shift_rect;
 use crate::game_graphics::BranchAnimationState;
 use crate::structs::just::Score;
@@ -190,7 +191,7 @@ where
 
     clear_background(canvas);
 
-    for (offset_y, score) in (0..).step_by(300).zip(scores) {
+    for (score, offset_y) in scores.iter().rev().zip(get_offsets_rev(scores.len())) {
         draw_background(canvas, assets, offset_y)
             .map_err(to_sdl_error("While drawing background"))?;
 
