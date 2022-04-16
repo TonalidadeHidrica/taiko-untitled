@@ -210,6 +210,7 @@ fn play(
             auto_sent_pointer,
         ))?;
     }
+    audio_manager.sort_play_schedules()?;
     audio_manager.set_play_scheduled(game_user_state.auto)?;
     audio_manager.play()?;
 
