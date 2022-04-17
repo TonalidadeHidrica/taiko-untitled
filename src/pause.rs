@@ -7,6 +7,7 @@ use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use sdl2::keyboard::Mod;
 use sdl2::render::WindowCanvas;
 use sdl2::EventPump;
 
@@ -134,55 +135,76 @@ where
             Event::Quit { .. } => return Ok(Some(PauseBreak::Exit)),
             Event::KeyDown {
                 keycode: Some(keycode),
+                keymod,
                 ..
-            } => match keycode {
-                Keycode::Space => {
-                    game_user_state.time = music_position.get();
-                    return Ok(Some(PauseBreak::Play(*game_user_state)));
+            } => {
+                let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
+                match keycode {
+                    Keycode::Space => {
+                        game_user_state.time = music_position.get();
+                        return Ok(Some(PauseBreak::Play(*game_user_state)));
+                    }
+                    Keycode::Q => {
+                        return Ok(Some(PauseBreak::Reload));
+                    }
+                    Keycode::F1 => game_user_state.auto = !game_user_state.auto,
+                    Keycode::PageDown => music_position.set_with(|x| {
+                        scores[0]
+                            .measure_scroll_points
+                            .range(..OrderedFloat::from(x - 1e-3))
+                            .next_back()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::PageUp => music_position.set_with(|x| {
+                        scores[0]
+                            .measure_scroll_points
+                            .range(OrderedFloat::from(x + 1e-3)..)
+                            .next()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::Left => music_position.set_with(|x| {
+                        scores[0]
+                            .beat_scroll_points
+                            .range(..OrderedFloat::from(x - 1e-3))
+                            .next_back()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::Right => music_position.set_with(|x| {
+                        scores[0]
+                            .beat_scroll_points
+                            .range(OrderedFloat::from(x + 1e-3)..)
+                            .next()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::Up => branch.update(|b| b.set(b.get().saturating_next(), 0.0)),
+                    Keycode::Down => branch.update(|b| b.set(b.get().saturating_prev(), 0.0)),
+                    Keycode::Num1 => {
+                        if shift {
+                            game_user_state.speed =
+                                (game_user_state.speed / 2.0f64.powf(1. / 12.)).max(0.0625)
+                        } else {
+                            game_user_state.speed = iterate(1.0, |x| x / 2.0)
+                                .take_while(|&x| x >= 0.0623)
+                                .find(|&x| x < game_user_state.speed - 1e-6)
+                                .unwrap_or(0.0625);
+                        }
+                        dbg!(game_user_state.speed);
+                    }
+                    Keycode::Num2 => {
+                        if shift {
+                            game_user_state.speed =
+                                (game_user_state.speed * 2.0f64.powf(1. / 12.)).min(1.0)
+                        } else {
+                            game_user_state.speed = iterate(0.0625, |x| x * 2.0)
+                                .take_while(|&x| x <= 1.0001)
+                                .find(|&x| x > game_user_state.speed + 1e-6)
+                                .unwrap_or(1.0);
+                        }
+                        dbg!(game_user_state.speed);
+                    }
+                    _ => {}
                 }
-                Keycode::Q => {
-                    return Ok(Some(PauseBreak::Reload));
-                }
-                Keycode::F1 => game_user_state.auto = !game_user_state.auto,
-                Keycode::PageDown => music_position.set_with(|x| {
-                    scores[0]
-                        .measure_scroll_points
-                        .range(..OrderedFloat::from(x - 1e-3))
-                        .next_back()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::PageUp => music_position.set_with(|x| {
-                    scores[0]
-                        .measure_scroll_points
-                        .range(OrderedFloat::from(x + 1e-3)..)
-                        .next()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::Left => music_position.set_with(|x| {
-                    scores[0]
-                        .beat_scroll_points
-                        .range(..OrderedFloat::from(x - 1e-3))
-                        .next_back()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::Right => music_position.set_with(|x| {
-                    scores[0]
-                        .beat_scroll_points
-                        .range(OrderedFloat::from(x + 1e-3)..)
-                        .next()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::Up => branch.update(|b| b.set(b.get().saturating_next(), 0.0)),
-                Keycode::Down => branch.update(|b| b.set(b.get().saturating_prev(), 0.0)),
-                Keycode::Num1 => {
-                    game_user_state.speed =
-                        (game_user_state.speed / 2.0f64.powf(1. / 12.)).max(0.25)
-                }
-                Keycode::Num2 => {
-                    game_user_state.speed = (game_user_state.speed * 2.0f64.powf(1. / 12.)).min(1.0)
-                }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
