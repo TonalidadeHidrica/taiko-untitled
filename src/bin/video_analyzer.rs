@@ -11,7 +11,7 @@ use sdl2::image::LoadTexture;
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::{Point, Rect};
-use sdl2::render::Texture;
+use sdl2::render::{Texture, WindowCanvas};
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::BTreeMap;
@@ -587,6 +587,8 @@ fn main() -> Result<(), MainErr> {
             current_top += (text_height as f64 * 1.2) as i32;
         }
 
+        // detect_notes(&mut canvas, &frame, focus_y)?;
+
         canvas.present();
 
         // std::thread::sleep(Duration::from_secs_f32(1.0 / 60.0));
@@ -861,4 +863,77 @@ impl ScoreTimeDeltas {
             0.0
         }
     }
+}
+
+#[allow(unused)]
+fn detect_notes(
+    canvas: &mut WindowCanvas,
+    frame: &frame::Video,
+    focus_y: i32,
+) -> Result<(), MainErr> {
+    if frame.planes() == 0 {
+        return Ok(());
+    }
+
+    let y = 600;
+    canvas.set_draw_color(Color::BLACK);
+    canvas.fill_rect(Rect::new(0, y, 1920, 256))?;
+    canvas.set_draw_color(Color::WHITE);
+    canvas.draw_line((0, y + 255 - 200), (1920, y + 255 - 200))?;
+
+    let s = frame.stride(0);
+    let data = &frame.data(0)[focus_y as usize * s..];
+
+    {
+        let mut list = vec![];
+        let mut bef = 0;
+        let mut start = None;
+        for (i, &d) in data.iter().enumerate().take(1920).skip(game_rect().x as usize) {
+            let intersection = || i as f64 + (200.0 - bef as f64) / (d as f64 - bef as f64);
+            if bef <= 200 && 200 < d {
+                start = Some(intersection());
+            } else if bef > 200 && 200 >= d {
+                let start = start.take().expect("There should always be a start");
+                let end = intersection();
+                let bef = {
+                    let t = start as usize;
+                    let s = t.saturating_sub(7).max(game_rect().x as usize);
+                    if t > 1729920 {
+                        println!("{:?}", (start, t, s));
+                    }
+                    data[s..t].iter().any(|&d| d <= 48)
+                };
+                let aft = {
+                    let s = end as usize;
+                    let t = s.saturating_add(7).min(1920);
+                    data[s..t].iter().any(|&d| d <= 48)
+                };
+                list.push((bef, start, end, aft));
+            }
+            bef = d;
+        }
+        println!("{:?}", list);
+    }
+
+    let detected = data[game_rect().x as usize..1920]
+        .iter()
+        .zip(game_rect().x..1920)
+        .tuple_windows()
+        .filter_map(|((&a, i), (&b, _))| ((a <= 200) ^ (b <= 200)).then(|| i))
+        .collect_vec();
+
+    let rects = detected
+        .iter()
+        .map(|x| Rect::new(x - 2, y + 255 - 200 - 2, 5, 5))
+        .collect_vec();
+    canvas.set_draw_color(Color::RED);
+    canvas.draw_rects(&rects)?;
+
+    let lines = (0..s)
+        .map(|i| Point::new(i as i32, y + 255 - data[i] as i32))
+        .collect_vec();
+    canvas.set_draw_color(Color::GREEN);
+    canvas.draw_lines(&lines as &[Point])?;
+
+    Ok(())
 }
