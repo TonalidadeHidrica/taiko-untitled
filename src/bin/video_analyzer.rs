@@ -463,6 +463,8 @@ fn main() -> Result<(), MainErr> {
             }
         }
 
+        detect_notes(&mut canvas, &frame, focus_y)?;
+
         if cursor_mode {
             canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
                 x if x < 500 => Color::WHITE,
@@ -586,8 +588,6 @@ fn main() -> Result<(), MainErr> {
             canvas.copy(&text_texture, None, rect)?;
             current_top += (text_height as f64 * 1.2) as i32;
         }
-
-        // detect_notes(&mut canvas, &frame, focus_y)?;
 
         canvas.present();
 
@@ -865,7 +865,6 @@ impl ScoreTimeDeltas {
     }
 }
 
-#[allow(unused)]
 fn detect_notes(
     canvas: &mut WindowCanvas,
     frame: &frame::Video,
@@ -884,11 +883,18 @@ fn detect_notes(
     let s = frame.stride(0);
     let data = &frame.data(0)[focus_y as usize * s..];
 
-    {
+    let (list, smalls, larges) = {
         let mut list = vec![];
+        let mut smalls = vec![];
+        let mut larges = vec![];
         let mut bef = 0;
         let mut start = None;
-        for (i, &d) in data.iter().enumerate().take(1920).skip(game_rect().x as usize) {
+        for (i, &d) in data
+            .iter()
+            .enumerate()
+            .take(1920)
+            .skip(game_rect().x as usize)
+        {
             let intersection = || i as f64 + (200.0 - bef as f64) / (d as f64 - bef as f64);
             if bef <= 200 && 200 < d {
                 start = Some(intersection());
@@ -908,26 +914,60 @@ fn detect_notes(
                     let t = s.saturating_add(7).min(1920);
                     data[s..t].iter().any(|&d| d <= 48)
                 };
-                list.push((bef, start, end, aft));
+                list.push(Some((bef, start, end, aft)));
             }
             bef = d;
         }
-        println!("{:?}", list);
+        for i in 1..=list.len().saturating_sub(1) {
+            let (s, t) = list.split_at_mut(i);
+            let (s_opt, t_opt) = (s.last_mut().unwrap(), &mut t[0]);
+            let (s, t) = match (*s_opt, *t_opt) {
+                (Some(s), Some(t)) => (s, t),
+                _ => continue,
+            };
+            if s.0 && !s.3 && !t.0 && t.3 {
+                // 77, 119
+                let size = t.1 - s.2;
+                let push_to = if (72.0..82.0).contains(&size) {
+                    Some(&mut smalls)
+                } else if (115.0..125.0).contains(&size) {
+                    Some(&mut larges)
+                } else {
+                    None
+                };
+                if let Some(push_to) = push_to {
+                    push_to.push((s, t));
+                    s_opt.take();
+                    t_opt.take();
+                }
+            }
+        }
+        let list = list.into_iter().flatten().collect_vec();
+        (list, smalls, larges)
+    };
+
+    for (color, notes) in [(Color::BLUE, &smalls), (Color::RED, &larges)] {
+        let rects = notes
+            .iter()
+            .map(|(s, t)| {
+                Rect::new(
+                    s.2 as i32,
+                    y + 255 - 200 - 2,
+                    (t.1 as i32 - s.2 as i32) as u32,
+                    5,
+                )
+            })
+            .collect_vec();
+        canvas.set_draw_color(color);
+        canvas.fill_rects(&rects)?;
     }
 
-    let detected = data[game_rect().x as usize..1920]
-        .iter()
-        .zip(game_rect().x..1920)
-        .tuple_windows()
-        .filter_map(|((&a, i), (&b, _))| ((a <= 200) ^ (b <= 200)).then(|| i))
-        .collect_vec();
-
-    let rects = detected
-        .iter()
-        .map(|x| Rect::new(x - 2, y + 255 - 200 - 2, 5, 5))
-        .collect_vec();
-    canvas.set_draw_color(Color::RED);
-    canvas.draw_rects(&rects)?;
+    // let rects = list
+    //     .iter()
+    //     .map(|x| Rect::new(x - 2, y + 255 - 200 - 2, 5, 5))
+    //     .collect_vec();
+    // canvas.set_draw_color(Color::RED);
+    // canvas.draw_rects(&rects)?;
 
     let lines = (0..s)
         .map(|i| Point::new(i as i32, y + 255 - data[i] as i32))
