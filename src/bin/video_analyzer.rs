@@ -883,10 +883,9 @@ fn detect_notes(
     let s = frame.stride(0);
     let data = &frame.data(0)[focus_y as usize * s..];
 
-    let (list, smalls, larges) = {
+    let (_list, notes) = {
         let mut list = vec![];
-        let mut smalls = vec![];
-        let mut larges = vec![];
+        let mut notes = vec![];
         let mut bef = 0;
         let mut start = None;
         for (i, &d) in data
@@ -928,52 +927,71 @@ fn detect_notes(
             if s.0 && !s.3 && !t.0 && t.3 {
                 // 77, 119
                 let size = t.1 - s.2;
-                let push_to = if (72.0..82.0).contains(&size) {
-                    Some(&mut smalls)
+                let size = if (72.0..82.0).contains(&size) {
+                    Some(NoteSize::Small)
                 } else if (115.0..125.0).contains(&size) {
-                    Some(&mut larges)
+                    Some(NoteSize::Large)
                 } else {
                     None
                 };
-                if let Some(push_to) = push_to {
-                    push_to.push((s, t));
+                let color = {
+                    let k = (focus_y as usize / 2) * frame.stride(2);
+                    let data = &frame.data(2)[k..];
+                    let (mut pos, mut neg) = (0, 0);
+                    for &d in ((s.2 as usize) / 2..=(t.1 as usize) / 2).filter_map(|i| data.get(i))
+                    {
+                        if d >= 128 {
+                            pos += 1;
+                        } else {
+                            neg += 1;
+                        }
+                    }
+                    if pos > neg {
+                        NoteColor::Don
+                    } else {
+                        NoteColor::Ka
+                    }
+                };
+                if let Some(size) = size {
+                    notes.push((s, t, size, color));
                     s_opt.take();
                     t_opt.take();
                 }
             }
         }
         let list = list.into_iter().flatten().collect_vec();
-        (list, smalls, larges)
+        (list, notes)
     };
 
-    for (color, notes) in [(Color::BLUE, &smalls), (Color::RED, &larges)] {
-        let rects = notes
-            .iter()
-            .map(|(s, t)| {
-                Rect::new(
-                    s.2 as i32,
-                    y + 255 - 200 - 2,
-                    (t.1 as i32 - s.2 as i32) as u32,
-                    5,
-                )
-            })
-            .collect_vec();
-        canvas.set_draw_color(color);
-        canvas.fill_rects(&rects)?;
+    for (s, t, size, color) in notes {
+        let rect = Rect::new(
+            s.2 as i32,
+            y + 255 - 200 - 2,
+            (t.1 as i32 - s.2 as i32) as u32,
+            5,
+        );
+        canvas.set_draw_color(match (size, color) {
+            (NoteSize::Small, NoteColor::Don) => Color::RED,
+            (NoteSize::Small, NoteColor::Ka) => Color::BLUE,
+            (NoteSize::Large, NoteColor::Don) => Color::MAGENTA,
+            (NoteSize::Large, NoteColor::Ka) => Color::CYAN,
+        });
+        canvas.fill_rect(rect)?;
     }
 
-    // let rects = list
-    //     .iter()
-    //     .map(|x| Rect::new(x - 2, y + 255 - 200 - 2, 5, 5))
-    //     .collect_vec();
-    // canvas.set_draw_color(Color::RED);
-    // canvas.draw_rects(&rects)?;
-
-    let lines = (0..s)
-        .map(|i| Point::new(i as i32, y + 255 - data[i] as i32))
-        .collect_vec();
-    canvas.set_draw_color(Color::GREEN);
-    canvas.draw_lines(&lines as &[Point])?;
+    for ((i, color), rate) in (0..frame.planes())
+        .take(3)
+        .zip([Color::GREEN, Color::BLUE, Color::RED])
+        .zip([1usize, 2, 2])
+    {
+        let k = (focus_y as usize / rate) * (s / rate);
+        let data = &frame.data(i)[k..];
+        let lines = (0..s / rate)
+            .map(|i| Point::new((i * rate) as i32, y + 255 - data[i] as i32))
+            .collect_vec();
+        canvas.set_draw_color(color);
+        canvas.draw_lines(&lines[..])?;
+    }
 
     Ok(())
 }
