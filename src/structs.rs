@@ -1,4 +1,5 @@
 use enum_map::Enum;
+use serde::{Serialize, Deserialize};
 
 pub mod typed {
     use super::*;
@@ -183,19 +184,19 @@ pub enum Level {
     Oni,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SingleNoteKind {
     pub color: NoteColor,
     pub size: NoteSize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NoteColor {
     Don,
     Ka,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum NoteSize {
     Small,
     Large,

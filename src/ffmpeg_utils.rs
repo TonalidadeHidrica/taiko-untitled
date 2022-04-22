@@ -1,3 +1,5 @@
+use ffmpeg4::{format::context::input::PacketIter, Packet, decoder, frame};
+
 pub fn get_sdl_pix_fmt_and_blendmode(
     pixel_format: ffmpeg4::util::format::pixel::Pixel,
 ) -> (sdl2::render::BlendMode, sdl2::pixels::PixelFormatEnum) {
@@ -38,3 +40,31 @@ pub fn get_sdl_pix_fmt_and_blendmode(
 
     (sdl_blendmode, sdl_pix_fmt)
 }
+
+pub struct FilteredPacketIter<'a>(pub PacketIter<'a>, pub usize);
+impl<'a> Iterator for FilteredPacketIter<'a> {
+    type Item = Packet;
+    fn next(&mut self) -> Option<Self::Item> {
+        for (stream, packet) in &mut self.0 {
+            if stream.index() == self.1 {
+                return Some(packet);
+            }
+        }
+        None
+    }
+}
+
+pub fn next_frame(
+    packet_iterator: &mut FilteredPacketIter,
+    decoder: &mut decoder::Video,
+    frame: &mut frame::Video,
+) -> Result<bool, ffmpeg4::Error> {
+    // We assume that a frame is always decoded.
+    for packet in packet_iterator.by_ref() {
+        if decoder.decode(&packet, frame)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+

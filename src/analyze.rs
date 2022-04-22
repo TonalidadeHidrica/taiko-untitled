@@ -1,5 +1,6 @@
 use ffmpeg4::frame;
 use itertools::Itertools;
+use serde::{Serialize, Deserialize};
 
 use crate::{
     game_graphics::game_rect,
@@ -8,7 +9,7 @@ use crate::{
 
 pub type NoteEndpoint = (bool, f64, f64, bool);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct DetectedNote {
     pub kind: SingleNoteKind,
     pub left: NoteEndpoint,
@@ -20,7 +21,13 @@ impl DetectedNote {
     }
 }
 
-pub fn detect_note_positions(frame: &frame::Video) -> (Vec<NoteEndpoint>, Vec<DetectedNote>) {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DetectedNotePositionsResult {
+    pub list: Vec<NoteEndpoint>,
+    pub notes: Vec<DetectedNote>,
+}
+
+pub fn detect_note_positions(frame: &frame::Video) -> DetectedNotePositionsResult {
     let focus_y = 385;
 
     let s = frame.stride(0);
@@ -102,5 +109,5 @@ pub fn detect_note_positions(frame: &frame::Video) -> (Vec<NoteEndpoint>, Vec<De
         }
     }
     let list = list.into_iter().flatten().collect_vec();
-    (list, notes)
+    DetectedNotePositionsResult { list, notes }
 }

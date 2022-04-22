@@ -1,9 +1,8 @@
 use config::Config;
 use ffmpeg4::codec::decoder;
-use ffmpeg4::format::context::input::PacketIter;
 use ffmpeg4::sys::{av_seek_frame, AVSEEK_FLAG_BACKWARD};
 use ffmpeg4::util::{frame, media};
-use ffmpeg4::{format, Packet, Rational};
+use ffmpeg4::{format, Rational};
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use sdl2::event::Event;
@@ -23,7 +22,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use taiko_untitled::analyze::{detect_note_positions, DetectedNote};
 use taiko_untitled::assets::Assets;
-use taiko_untitled::ffmpeg_utils::get_sdl_pix_fmt_and_blendmode;
+use taiko_untitled::ffmpeg_utils::{get_sdl_pix_fmt_and_blendmode, FilteredPacketIter, next_frame};
 use taiko_untitled::game::draw_game_notes;
 use taiko_untitled::game_graphics::{draw_note, game_rect};
 use taiko_untitled::game_manager::{GameManager, Score};
@@ -44,19 +43,6 @@ where
 }
 fn debug_to_err<T: std::fmt::Debug>() -> impl Fn(T) -> MainErr {
     |e| MainErr(format!("{:?}", e))
-}
-
-struct FilteredPacketIter<'a>(PacketIter<'a>, usize);
-impl<'a> Iterator for FilteredPacketIter<'a> {
-    type Item = Packet;
-    fn next(&mut self) -> Option<Self::Item> {
-        for (stream, packet) in &mut self.0 {
-            if stream.index() == self.1 {
-                return Some(packet);
-            }
-        }
-        None
-    }
 }
 
 fn main() -> Result<(), MainErr> {
@@ -618,20 +604,6 @@ fn seek<'a>(
     Ok(packet_iterator)
 }
 
-fn next_frame(
-    packet_iterator: &mut FilteredPacketIter,
-    decoder: &mut decoder::Video,
-    frame: &mut frame::Video,
-) -> Result<bool, MainErr> {
-    // We assume that a frame is always decoded.
-    for packet in packet_iterator.by_ref() {
-        if decoder.decode(&packet, frame)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 fn update_frame_to_texture(
     frame: &frame::Video,
     video_texture: &mut Texture,
@@ -830,9 +802,9 @@ fn detect_notes(
 
     let s = frame.stride(0);
 
-    let (_list, notes) = detect_note_positions(frame);
+    let result = detect_note_positions(frame);
 
-    for note in &notes {
+    for note in &result.notes {
         let rect = Rect::new(
             note.left.2 as i32,
             y + 255 - 200 - 2,
@@ -870,5 +842,5 @@ fn detect_notes(
         canvas.draw_lines(&lines[..])?;
     }
 
-    Ok(notes)
+    Ok(result.notes)
 }

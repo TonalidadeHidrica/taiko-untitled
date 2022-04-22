@@ -1542,6 +1542,7 @@ dependencies = [
  "rodio",
  "sdl2",
  "serde 1.0.136",
+ "serde_json",
  "universal-audio-decoder",
 ]
 
