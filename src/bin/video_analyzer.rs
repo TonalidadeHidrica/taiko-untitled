@@ -212,6 +212,7 @@ fn main() -> Result<(), MainErr> {
         .unwrap_or_default();
     let mut score_time_delta = None;
     let mut show_score = true;
+    let mut show_detected_notes = false;
     let mut note_kind = None;
     let mut note_x = 500;
 
@@ -373,6 +374,7 @@ fn main() -> Result<(), MainErr> {
                             )?;
                         }
                         Keycode::Num2 if shift => show_score = !show_score,
+                        Keycode::Num3 if shift => show_detected_notes = !show_detected_notes,
                         Keycode::Num0 if alt => note_kind = None,
                         Keycode::Num1 if alt => {
                             note_kind = Some(SingleNoteKind {
@@ -463,7 +465,7 @@ fn main() -> Result<(), MainErr> {
             }
         }
 
-        detect_notes(&mut canvas, &frame, focus_y)?;
+        let notes = detect_notes(&mut canvas, &frame, focus_y)?;
 
         if cursor_mode {
             canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
@@ -533,7 +535,7 @@ fn main() -> Result<(), MainErr> {
         let rect = Rect::new(sx, sy, (tx - sx) as _, (ty - sy) as _);
         canvas.set_clip_rect(rect);
         {
-            if score.is_some() && show_score || note_kind.is_some() {
+            if score.is_some() && show_score || note_kind.is_some() || show_detected_notes {
                 canvas.set_draw_color((28, 28, 28));
                 canvas.fill_rect(rect)?;
             }
@@ -546,6 +548,13 @@ fn main() -> Result<(), MainErr> {
                 let time = f64::from(Rational::new(pts as i32, 1) * time_base) + delta;
                 draw_game_notes(&mut canvas, &game_assets, time, score)
                     .map_err(|e| MainErr(format!("{:?}", e)))?;
+            }
+            if show_detected_notes {
+                for note in notes {
+                    let note_x = (note.left.2 + note.right.1) / 2. - 195. / 2.;
+                    draw_note(&mut canvas, &game_assets, &note.kind, note_x as _, 288)
+                        .map_err(debug_to_err())?;
+                }
             }
         }
         canvas.set_clip_rect(None);
@@ -865,13 +874,20 @@ impl ScoreTimeDeltas {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DetectedNote {
+    kind: SingleNoteKind,
+    left: (bool, f64, f64, bool),
+    right: (bool, f64, f64, bool),
+}
+
 fn detect_notes(
     canvas: &mut WindowCanvas,
     frame: &frame::Video,
     focus_y: i32,
-) -> Result<(), MainErr> {
+) -> Result<Vec<DetectedNote>, MainErr> {
     if frame.planes() == 0 {
-        return Ok(());
+        return Ok(vec![]);
     }
 
     let y = 600;
@@ -903,9 +919,6 @@ fn detect_notes(
                 let bef = {
                     let t = start as usize;
                     let s = t.saturating_sub(7).max(game_rect().x as usize);
-                    if t > 1729920 {
-                        println!("{:?}", (start, t, s));
-                    }
                     data[s..t].iter().any(|&d| d <= 48)
                 };
                 let aft = {
@@ -953,7 +966,11 @@ fn detect_notes(
                     }
                 };
                 if let Some(size) = size {
-                    notes.push((s, t, size, color));
+                    notes.push(DetectedNote {
+                        left: s,
+                        right: t,
+                        kind: SingleNoteKind { size, color },
+                    });
                     s_opt.take();
                     t_opt.take();
                 }
@@ -963,14 +980,14 @@ fn detect_notes(
         (list, notes)
     };
 
-    for (s, t, size, color) in notes {
+    for note in &notes {
         let rect = Rect::new(
-            s.2 as i32,
+            note.left.2 as i32,
             y + 255 - 200 - 2,
-            (t.1 as i32 - s.2 as i32) as u32,
+            (note.right.1 as i32 - note.left.2 as i32) as u32,
             5,
         );
-        canvas.set_draw_color(match (size, color) {
+        canvas.set_draw_color(match (note.kind.size, note.kind.color) {
             (NoteSize::Small, NoteColor::Don) => Color::RED,
             (NoteSize::Small, NoteColor::Ka) => Color::BLUE,
             (NoteSize::Large, NoteColor::Don) => Color::MAGENTA,
@@ -993,5 +1010,5 @@ fn detect_notes(
         canvas.draw_lines(&lines[..])?;
     }
 
-    Ok(())
+    Ok(notes)
 }
