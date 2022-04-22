@@ -1,3 +1,4 @@
+pub mod analyze;
 pub mod ffmpeg_utils;
 pub mod video_analyzer_assets;
 
