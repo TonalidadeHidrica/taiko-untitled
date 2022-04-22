@@ -11,7 +11,9 @@ use sdl2::image::LoadTexture;
 use sdl2::keyboard::{Keycode, Mod};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::{Point, Rect};
-use sdl2::render::{Texture, WindowCanvas};
+use sdl2::render::{Texture, TextureCreator, WindowCanvas};
+use sdl2::ttf::Font;
+use sdl2::video::WindowContext;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::BTreeMap;
@@ -465,7 +467,7 @@ fn main() -> Result<(), MainErr> {
             }
         }
 
-        let notes = detect_notes(&mut canvas, &frame, focus_y)?;
+        let notes = detect_notes(&mut canvas, &texture_creator, &font, &frame, focus_y)?;
 
         if cursor_mode {
             canvas.set_draw_color(match (Instant::now() - start).as_millis() % 1000 {
@@ -551,7 +553,7 @@ fn main() -> Result<(), MainErr> {
             }
             if show_detected_notes {
                 for note in notes {
-                    let note_x = (note.left.2 + note.right.1) / 2. - 195. / 2.;
+                    let note_x = note.note_x();
                     draw_note(&mut canvas, &game_assets, &note.kind, note_x as _, 288)
                         .map_err(debug_to_err())?;
                 }
@@ -880,9 +882,16 @@ struct DetectedNote {
     left: (bool, f64, f64, bool),
     right: (bool, f64, f64, bool),
 }
+impl DetectedNote {
+    fn note_x(self) -> f64 {
+        (self.left.2 + self.right.1) / 2. - 195. / 2.
+    }
+}
 
 fn detect_notes(
     canvas: &mut WindowCanvas,
+    texture_creator: &TextureCreator<WindowContext>,
+    font: &Font,
     frame: &frame::Video,
     focus_y: i32,
 ) -> Result<Vec<DetectedNote>, MainErr> {
@@ -994,6 +1003,14 @@ fn detect_notes(
             (NoteSize::Large, NoteColor::Ka) => Color::CYAN,
         });
         canvas.fill_rect(rect)?;
+
+        let text_surface = font
+            .render(&note.note_x().to_string())
+            .solid(Color::YELLOW)?;
+        let (w, h) = (text_surface.width(), text_surface.height());
+        let text_texture = texture_creator.create_texture_from_surface(text_surface)?;
+        let rect = Rect::new(note.left.2 as i32, y + 255 - 200 - 5, w, h);
+        canvas.copy(&text_texture, None, rect)?;
     }
 
     for ((i, color), rate) in (0..frame.planes())
