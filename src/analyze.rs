@@ -1,6 +1,6 @@
 use ffmpeg4::frame;
 use itertools::Itertools;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     game_graphics::game_rect,

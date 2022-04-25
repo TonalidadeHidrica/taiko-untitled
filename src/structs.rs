@@ -1,5 +1,5 @@
 use enum_map::Enum;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub mod typed {
     use super::*;

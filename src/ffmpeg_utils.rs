@@ -1,4 +1,4 @@
-use ffmpeg4::{format::context::input::PacketIter, Packet, decoder, frame};
+use ffmpeg4::{decoder, format::context::input::PacketIter, frame, Packet};
 
 pub fn get_sdl_pix_fmt_and_blendmode(
     pixel_format: ffmpeg4::util::format::pixel::Pixel,
@@ -67,4 +67,3 @@ pub fn next_frame(
     }
     Ok(false)
 }
-

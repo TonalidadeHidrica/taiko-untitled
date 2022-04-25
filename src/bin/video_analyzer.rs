@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use taiko_untitled::analyze::{detect_note_positions, DetectedNote};
 use taiko_untitled::assets::Assets;
-use taiko_untitled::ffmpeg_utils::{get_sdl_pix_fmt_and_blendmode, FilteredPacketIter, next_frame};
+use taiko_untitled::ffmpeg_utils::{get_sdl_pix_fmt_and_blendmode, next_frame, FilteredPacketIter};
 use taiko_untitled::game::draw_game_notes;
 use taiko_untitled::game_graphics::{draw_note, game_rect};
 use taiko_untitled::game_manager::{GameManager, Score};
