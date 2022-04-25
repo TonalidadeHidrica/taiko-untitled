@@ -1,8 +1,11 @@
 use sdl2::image::LoadTexture;
+use sdl2::pixels::Color;
 use sdl2::render::{Texture, TextureCreator, TextureQuery};
 use sdl2::video::WindowContext;
 use std::fmt::Debug;
 use std::path::Path;
+
+use crate::structs::{NoteColor, NoteSize, SingleNoteKind};
 
 pub struct Textures<'a> {
     pub background: Texture<'a>,
@@ -149,4 +152,13 @@ where
     (0..10)
         .map(to_texture)
         .collect::<Result<Vec<Texture<'a>>, String>>()
+}
+
+pub fn get_single_note_color(kind: SingleNoteKind) -> Color {
+    match (kind.size, kind.color) {
+        (NoteSize::Small, NoteColor::Don) => Color::RED,
+        (NoteSize::Small, NoteColor::Ka) => Color::BLUE,
+        (NoteSize::Large, NoteColor::Don) => Color::MAGENTA,
+        (NoteSize::Large, NoteColor::Ka) => Color::CYAN,
+    }
 }

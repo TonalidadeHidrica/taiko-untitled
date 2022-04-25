@@ -28,7 +28,7 @@ use taiko_untitled::game_graphics::{draw_note, game_rect};
 use taiko_untitled::game_manager::{GameManager, Score};
 use taiko_untitled::structs::{NoteColor, NoteSize, SingleNoteKind};
 use taiko_untitled::tja::load_tja_from_file;
-use taiko_untitled::video_analyzer_assets::Textures;
+use taiko_untitled::video_analyzer_assets::{Textures, get_single_note_color};
 
 #[derive(Debug)]
 struct MainErr(String);
@@ -811,12 +811,7 @@ fn detect_notes(
             (note.right.1 as i32 - note.left.2 as i32) as u32,
             5,
         );
-        canvas.set_draw_color(match (note.kind.size, note.kind.color) {
-            (NoteSize::Small, NoteColor::Don) => Color::RED,
-            (NoteSize::Small, NoteColor::Ka) => Color::BLUE,
-            (NoteSize::Large, NoteColor::Don) => Color::MAGENTA,
-            (NoteSize::Large, NoteColor::Ka) => Color::CYAN,
-        });
+        canvas.set_draw_color(get_single_note_color(note.kind));
         canvas.fill_rect(rect)?;
 
         let text_surface = font

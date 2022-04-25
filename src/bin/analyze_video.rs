@@ -5,9 +5,8 @@ use clap::{Args, Parser, Subcommand};
 use ffmpeg4::{format, frame, media};
 
 use fs_err::File;
-use serde::{Deserialize, Serialize};
 use taiko_untitled::{
-    analyze::{detect_note_positions, DetectedNotePositionsResult},
+    analyze::{detect_note_positions, NotePositionsResult},
     ffmpeg_utils::{next_frame, FilteredPacketIter},
 };
 
@@ -60,10 +59,4 @@ fn video_to_note_positions(args: &VideoToNotePositions) -> anyhow::Result<()> {
     serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
 
     Ok(())
-}
-
-#[derive(Serialize, Deserialize)]
-struct NotePositionsResult {
-    time_base: (i32, i32),
-    results: BTreeMap<i64, DetectedNotePositionsResult>,
 }

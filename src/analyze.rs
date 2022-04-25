@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ffmpeg4::frame;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,12 @@ impl DetectedNote {
 pub struct DetectedNotePositionsResult {
     pub list: Vec<NoteEndpoint>,
     pub notes: Vec<DetectedNote>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct NotePositionsResult {
+    pub time_base: (i32, i32),
+    pub results: BTreeMap<i64, DetectedNotePositionsResult>,
 }
 
 pub fn detect_note_positions(frame: &frame::Video) -> DetectedNotePositionsResult {
