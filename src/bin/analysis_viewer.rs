@@ -38,6 +38,8 @@ fn main() -> anyhow::Result<()> {
     let dpi_factor = canvas.window().drawable_size().0 as f64 / canvas.window().size().0 as f64;
 
     let mut app_state = AppState {
+        origin_x: 0.0,
+        scale_x: 1.0,
         origin_y: 40.0,
         scale_y: 1.0 / 64.0,
     };
@@ -56,10 +58,15 @@ fn main() -> anyhow::Result<()> {
                 Event::Quit { .. } => break 'main,
                 Event::MouseWheel { y, .. } => {
                     let y = y as f64;
-                    if shift {
+                    if shift || alt {
                         let scale_factor = 1.05f64.powf(-y);
-                        app_state.origin_y = mouse_y + (app_state.origin_y - mouse_y) * scale_factor;
-                        app_state.scale_y *= scale_factor;
+                        let (origin, scale, mouse) = if shift {
+                            (&mut app_state.origin_y, &mut app_state.scale_y, mouse_y)
+                        } else {
+                            (&mut app_state.origin_x, &mut app_state.scale_x, mouse_x)
+                        };
+                        *origin = mouse + (*origin - mouse) * scale_factor;
+                        *scale *= scale_factor;
                     } else {
                         app_state.origin_y += y * 10.0;
                     }
@@ -75,6 +82,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 struct AppState {
+    origin_x: f64,
+    scale_x: f64,
     origin_y: f64,
     scale_y: f64,
 }
@@ -90,8 +99,8 @@ fn draw(
     for (&pts, frame) in &data.results {
         let y = app_state.origin_y + pts as f64 * app_state.scale_y;
         for note in &frame.notes {
-            let x = note.note_x() as i32;
-            let rect = Rect::from_center((x, y as i32), 3, 3);
+            let x = app_state.origin_x + note.note_x() * app_state.scale_x;
+            let rect = Rect::from_center((x as i32, y as i32), 3, 3);
             canvas.set_draw_color(get_single_note_color(note.kind));
             canvas.fill_rect(rect)?;
         }
