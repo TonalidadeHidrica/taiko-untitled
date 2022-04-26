@@ -40,8 +40,7 @@ fn main() -> anyhow::Result<()> {
         .build()
         .map_err(|e| anyhow!("{}", e))?;
     let mut event_pump = sdl_context.event_pump().map_err(|e| anyhow!("{}", e))?;
-    let mouse_util = sdl_context.mouse();
-    let ttf_context = sdl2::ttf::init().map_err(|e| anyhow!("{}", e))?;
+    let _ttf_context = sdl2::ttf::init().map_err(|e| anyhow!("{}", e))?;
 
     let dpi_factor = canvas.window().drawable_size().0 as f64 / canvas.window().size().0 as f64;
 
@@ -152,7 +151,7 @@ fn draw(
         // canvas.draw_line((0, y as i32), (1920, y as i32))?;
         for note in &frame.notes {
             let x = app_state.to_x(note.note_x());
-            let rect = Rect::from_center((x as i32, y as i32), 3, 3);
+            let rect = Rect::from_center((x as i32, y as i32), 5, 5);
             canvas.set_draw_color(get_single_note_color(note.kind));
             canvas.fill_rect(rect)?;
         }
@@ -161,7 +160,7 @@ fn draw(
     if let Some((pts, note_x)) = app_state.mouse_over_point {
         let x = app_state.to_x(note_x);
         let y = app_state.to_y(pts);
-        let rect = Rect::from_center((x as i32, y as i32), 5, 5);
+        let rect = Rect::from_center((x as i32, y as i32), 7, 7);
         canvas.set_draw_color(Color::YELLOW);
         canvas.draw_rect(rect)?;
     }
