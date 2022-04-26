@@ -98,6 +98,8 @@ fn draw(
 
     for (&pts, frame) in &data.results {
         let y = app_state.origin_y + pts as f64 * app_state.scale_y;
+        canvas.set_draw_color(Color::GRAY);
+        canvas.draw_line((0, y as i32), (1920, y as i32))?;
         for note in &frame.notes {
             let x = app_state.origin_x + note.note_x() * app_state.scale_x;
             let rect = Rect::from_center((x as i32, y as i32), 3, 3);
