@@ -8,7 +8,7 @@ use itertools::{chain, Itertools};
 use ordered_float::OrderedFloat;
 use sdl2::{
     event::Event,
-    keyboard::Scancode,
+    keyboard::{Keycode, Scancode},
     mouse::MouseWheelDirection,
     pixels::Color,
     rect::{Point, Rect},
@@ -63,6 +63,8 @@ fn main() -> anyhow::Result<()> {
 
         selected_points: vec![],
         mouse_over_point: None,
+
+        show_grid: false,
     };
 
     'main: loop {
@@ -106,6 +108,14 @@ fn main() -> anyhow::Result<()> {
                         app_state.selected_points.push(mouse_over_point);
                     }
                 }
+                Event::KeyDown {
+                    keycode: Some(keycode),
+                    ..
+                } => match keycode {
+                    Keycode::Escape => app_state.selected_points.clear(),
+                    Keycode::G => app_state.show_grid = !app_state.show_grid,
+                    _ => (),
+                },
                 _ => {}
             }
         }
@@ -125,6 +135,8 @@ struct AppState {
 
     selected_points: Vec<(i64, f64)>,
     mouse_over_point: Option<(i64, f64)>,
+
+    show_grid: bool,
 }
 impl AppState {
     fn to_x(&self, note_x: f64) -> f64 {
@@ -169,8 +181,13 @@ fn draw(
 
     for (&pts, frame) in &data.results {
         let y = app_state.to_y(pts);
-        canvas.set_draw_color(Color::GRAY);
-        // canvas.draw_line((0, y as i32), (1920, y as i32))?;
+        if app_state.show_grid {
+            canvas.set_draw_color(Color::GRAY);
+            canvas.draw_line(
+                (0, y as i32),
+                (canvas.window().drawable_size().0 as i32, y as i32),
+            )?;
+        }
         for note in &frame.notes {
             let x = app_state.to_x(note.note_x());
             let rect = Rect::from_center((x as i32, y as i32), 9, 9);
