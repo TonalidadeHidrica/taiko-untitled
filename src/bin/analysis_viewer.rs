@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use clap::Parser;
+use config::Config;
 use fs_err::File;
 use itertools::{chain, Itertools};
 use ordered_float::OrderedFloat;
@@ -11,7 +12,9 @@ use sdl2::{
     mouse::MouseWheelDirection,
     pixels::Color,
     rect::{Point, Rect},
-    render::WindowCanvas,
+    render::{TextureCreator, WindowCanvas},
+    ttf::Font,
+    video::WindowContext,
 };
 use taiko_untitled::{analyze::NotePositionsResult, video_analyzer_assets::get_single_note_color};
 
@@ -22,6 +25,8 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
+    let mut config = Config::default();
+    let config = config.merge(config::File::with_name("config.toml"))?;
 
     let data: NotePositionsResult = serde_json::from_reader(File::open(&opts.json_path)?)?;
 
@@ -40,8 +45,12 @@ fn main() -> anyhow::Result<()> {
         .present_vsync()
         .build()
         .map_err(|e| anyhow!("{}", e))?;
+    let texture_creator = canvas.texture_creator();
     let mut event_pump = sdl_context.event_pump().map_err(|e| anyhow!("{}", e))?;
-    let _ttf_context = sdl2::ttf::init().map_err(|e| anyhow!("{}", e))?;
+    let ttf_context = sdl2::ttf::init().map_err(|e| anyhow!("{}", e))?;
+    let font = ttf_context
+        .load_font(&config.get::<PathBuf>("font")?, 32)
+        .map_err(|e| anyhow!("{}", e))?;
 
     let dpi_factor = canvas.window().drawable_size().0 as f64 / canvas.window().size().0 as f64;
 
@@ -101,7 +110,8 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        draw(&mut canvas, &data, &app_state).map_err(|e| anyhow!("{}", e))?;
+        draw(&mut canvas, &texture_creator, &font, &data, &app_state)
+            .map_err(|e| anyhow!("{}", e))?;
     }
 
     Ok(())
@@ -149,6 +159,8 @@ fn update_mouse_over(data: &NotePositionsResult, mouse: (f64, f64), app_state: &
 
 fn draw(
     canvas: &mut WindowCanvas,
+    texture_creator: &TextureCreator<WindowContext>,
+    font: &Font,
     data: &NotePositionsResult,
     app_state: &AppState,
 ) -> Result<(), String> {
@@ -176,15 +188,32 @@ fn draw(
     }
 
     canvas.set_draw_color(Color::GREEN);
-    canvas.draw_lines(
-        &app_state
-            .selected_points
-            .iter()
-            .map(|&(pts, note_x)| {
-                Point::new(app_state.to_x(note_x) as i32, app_state.to_y(pts) as i32)
-            })
-            .collect_vec()[..],
-    )?;
+    let points = app_state
+        .selected_points
+        .iter()
+        .map(|&(pts, note_x)| Point::new(app_state.to_x(note_x) as i32, app_state.to_y(pts) as i32))
+        .collect_vec();
+    canvas.draw_lines(&points[..])?;
+
+    for (((_, note_x_s), &s), ((_, note_x_t), &t)) in app_state
+        .selected_points
+        .iter()
+        .zip(&points)
+        .tuple_windows()
+    {
+        let x = (s.x + t.x) / 2;
+        let y = (s.y + t.y) / 2;
+        let text_surface = font
+            .render(&format!("{:.1}", note_x_s - note_x_t))
+            .solid(Color::WHITE)
+            .map_err(|e| e.to_string())?;
+        let (w, h) = (text_surface.width(), text_surface.height());
+        let text_texture = texture_creator
+            .create_texture_from_surface(text_surface)
+            .map_err(|e| e.to_string())?;
+        let rect = Rect::from_center((x, y), w, h);
+        canvas.copy(&text_texture, None, rect)?;
+    }
 
     canvas.present();
     Ok(())
