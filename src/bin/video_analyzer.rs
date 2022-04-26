@@ -28,7 +28,7 @@ use taiko_untitled::game_graphics::{draw_note, game_rect};
 use taiko_untitled::game_manager::{GameManager, Score};
 use taiko_untitled::structs::{NoteColor, NoteSize, SingleNoteKind};
 use taiko_untitled::tja::load_tja_from_file;
-use taiko_untitled::video_analyzer_assets::{Textures, get_single_note_color};
+use taiko_untitled::video_analyzer_assets::{get_single_note_color, Textures};
 
 #[derive(Debug)]
 struct MainErr(String);

@@ -3,11 +3,12 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 use clap::Parser;
 use fs_err::File;
-use itertools::Itertools;
+use itertools::{chain, Itertools};
 use ordered_float::OrderedFloat;
 use sdl2::{
     event::Event,
     keyboard::Scancode,
+    mouse::MouseWheelDirection,
     pixels::Color,
     rect::{Point, Rect},
     render::WindowCanvas,
@@ -24,8 +25,8 @@ fn main() -> anyhow::Result<()> {
 
     let data: NotePositionsResult = serde_json::from_reader(File::open(&opts.json_path)?)?;
 
-    let width = 960;
-    let height = 540;
+    let width = 1440;
+    let height = 810;
 
     let sdl_context = sdl2::init().map_err(|e| anyhow!("{}", e))?;
     let video_subsystem = sdl_context.video().map_err(|e| anyhow!("{}", e))?;
@@ -44,11 +45,12 @@ fn main() -> anyhow::Result<()> {
 
     let dpi_factor = canvas.window().drawable_size().0 as f64 / canvas.window().size().0 as f64;
 
+    let y_factor = canvas.window().drawable_size().1 as f64 / 1080.0;
     let mut app_state = AppState {
         origin_x: 0.0,
-        scale_x: 1.0,
-        origin_y: 40.0,
-        scale_y: 1.0 / 64.0,
+        scale_x: canvas.window().drawable_size().0 as f64 / 1920.0,
+        origin_y: -2680.0 * y_factor,
+        scale_y: y_factor / 64.0,
 
         selected_points: vec![],
         mouse_over_point: None,
@@ -67,19 +69,27 @@ fn main() -> anyhow::Result<()> {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'main,
-                Event::MouseWheel { y, .. } => {
+                Event::MouseWheel {
+                    x, y, direction, ..
+                } => {
+                    let x = x as f64;
                     let y = y as f64;
-                    if shift || alt {
+
+                    for (origin, scale, mouse) in chain!(
+                        shift.then(|| (&mut app_state.origin_y, &mut app_state.scale_y, mouse_y)),
+                        alt.then(|| (&mut app_state.origin_x, &mut app_state.scale_x, mouse_x)),
+                    ) {
                         let scale_factor = 1.05f64.powf(-y);
-                        let (origin, scale, mouse) = if shift {
-                            (&mut app_state.origin_y, &mut app_state.scale_y, mouse_y)
-                        } else {
-                            (&mut app_state.origin_x, &mut app_state.scale_x, mouse_x)
-                        };
                         *origin = mouse + (*origin - mouse) * scale_factor;
                         *scale *= scale_factor;
-                    } else {
-                        app_state.origin_y += y * 10.0;
+                    }
+                    if !shift && !alt {
+                        let sign = match direction {
+                            MouseWheelDirection::Flipped => -1.0,
+                            _ => 1.0,
+                        };
+                        app_state.origin_x -= x * 10.0;
+                        app_state.origin_y -= y * 10.0 * sign;
                     }
                 }
                 Event::MouseButtonDown { .. } => {
@@ -151,7 +161,7 @@ fn draw(
         // canvas.draw_line((0, y as i32), (1920, y as i32))?;
         for note in &frame.notes {
             let x = app_state.to_x(note.note_x());
-            let rect = Rect::from_center((x as i32, y as i32), 5, 5);
+            let rect = Rect::from_center((x as i32, y as i32), 9, 9);
             canvas.set_draw_color(get_single_note_color(note.kind));
             canvas.fill_rect(rect)?;
         }
@@ -160,7 +170,7 @@ fn draw(
     if let Some((pts, note_x)) = app_state.mouse_over_point {
         let x = app_state.to_x(note_x);
         let y = app_state.to_y(pts);
-        let rect = Rect::from_center((x as i32, y as i32), 7, 7);
+        let rect = Rect::from_center((x as i32, y as i32), 20, 20);
         canvas.set_draw_color(Color::YELLOW);
         canvas.draw_rect(rect)?;
     }
