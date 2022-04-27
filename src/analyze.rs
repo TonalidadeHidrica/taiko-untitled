@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use ffmpeg4::frame;
 use itertools::Itertools;
+use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -118,4 +119,15 @@ pub fn detect_note_positions(frame: &frame::Video) -> DetectedNotePositionsResul
     }
     let list = list.into_iter().flatten().collect_vec();
     DetectedNotePositionsResult { list, notes }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GroupNotesResult {
+    pub groups: Vec<GroupedNote>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GroupedNote {
+    pub kind: SingleNoteKind,
+    pub positions: Vec<(i64, NotNan<f64>)>,
 }

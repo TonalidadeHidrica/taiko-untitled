@@ -16,11 +16,15 @@ use sdl2::{
     ttf::Font,
     video::WindowContext,
 };
-use taiko_untitled::{analyze::NotePositionsResult, video_analyzer_assets::get_single_note_color};
+use taiko_untitled::{
+    analyze::{GroupNotesResult, NotePositionsResult},
+    video_analyzer_assets::get_single_note_color,
+};
 
 #[derive(Parser)]
 struct Opts {
-    json_path: PathBuf,
+    note_positions: PathBuf,
+    groups: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -31,7 +35,14 @@ fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     enable_momentum_scroll();
 
-    let data: NotePositionsResult = serde_json::from_reader(File::open(&opts.json_path)?)?;
+    let data = AppData {
+        positions: serde_json::from_reader(File::open(&opts.note_positions)?)?,
+        groups: opts
+            .groups
+            .as_ref()
+            .map(|p| anyhow::Ok(serde_json::from_reader(File::open(p)?)?))
+            .transpose()?,
+    };
 
     let width = 1440;
     let height = 810;
@@ -79,7 +90,7 @@ fn main() -> anyhow::Result<()> {
         let mouse_state = event_pump.mouse_state();
         let mouse_x = mouse_state.x() as f64 * dpi_factor;
         let mouse_y = mouse_state.y() as f64 * dpi_factor;
-        update_mouse_over(&data, (mouse_x, mouse_y), &mut app_state);
+        update_mouse_over(&data.positions, (mouse_x, mouse_y), &mut app_state);
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'main,
@@ -130,6 +141,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+struct AppData {
+    positions: NotePositionsResult,
+    groups: Option<GroupNotesResult>,
+}
+
 struct AppState {
     origin_x: f64,
     scale_x: f64,
@@ -176,13 +192,26 @@ fn draw(
     canvas: &mut WindowCanvas,
     texture_creator: &TextureCreator<WindowContext>,
     font: &Font,
-    data: &NotePositionsResult,
+    data: &AppData,
     app_state: &AppState,
 ) -> Result<(), String> {
     canvas.set_draw_color(Color::BLACK);
     canvas.clear();
 
-    for (&pts, frame) in &data.results {
+    for group in data.groups.iter().flat_map(|x| &x.groups) {
+        canvas.set_draw_color(Color::GREEN);
+        let points = group
+            .positions
+            .iter()
+            .map(|&(pts, note_x)| {
+                Point::new(app_state.to_x(*note_x) as i32, app_state.to_y(pts) as i32)
+            })
+            .collect_vec();
+        canvas.set_draw_color(Color::GREEN);
+        canvas.draw_lines(&points[..])?;
+    }
+
+    for (&pts, frame) in &data.positions.results {
         let y = app_state.to_y(pts);
         if app_state.show_grid {
             canvas.set_draw_color(Color::GRAY);
@@ -200,11 +229,22 @@ fn draw(
     }
 
     if let Some((pts, note_x)) = app_state.mouse_over_point {
-        let x = app_state.to_x(note_x);
-        let y = app_state.to_y(pts);
-        let rect = Rect::from_center((x as i32, y as i32), 20, 20);
+        let x = app_state.to_x(note_x) as i32;
+        let y = app_state.to_y(pts) as i32;
+        let rect = Rect::from_center((x, y), 20, 20);
         canvas.set_draw_color(Color::YELLOW);
         canvas.draw_rect(rect)?;
+
+        let text_surface = font
+            .render(&format!("{}, {:.1}", pts, note_x))
+            .solid(Color::WHITE)
+            .map_err(|e| e.to_string())?;
+        let (w, h) = (text_surface.width(), text_surface.height());
+        let text_texture = texture_creator
+            .create_texture_from_surface(text_surface)
+            .map_err(|e| e.to_string())?;
+        let rect = Rect::new(x, y, w, h);
+        canvas.copy(&text_texture, None, rect)?;
     }
 
     canvas.set_draw_color(Color::GREEN);
