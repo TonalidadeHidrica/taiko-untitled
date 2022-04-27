@@ -262,5 +262,36 @@ fn fix_group(args: &FixGroup) -> anyhow::Result<()> {
         paths.push(path);
     }
 
+    let positions: NotePositionsResult =
+        serde_json::from_reader(BufReader::new(File::open(&args.positions_path)?))?;
+    let map = positions
+        .results
+        .into_iter()
+        .flat_map(|(pts, res)| {
+            res.notes
+                .into_iter()
+                .map(move |note| ((pts, NotNan::new(note.note_x()).unwrap()), note.kind))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let map = |(pts, note_x): (i64, NotNan<f64>)| {
+        let eps = NotNan::new(1e-3).unwrap();
+        match &map
+            .range((pts, note_x - eps)..(pts, note_x + eps))
+            .take(2)
+            .collect_vec()[..]
+        {
+            &[(_, &x)] => Some(x),
+            _ => None,
+        }
+    };
+    let mut result = GroupNotesResult { groups: vec![] };
+    for positions in paths {
+        let kind = map(positions[0]).unwrap();
+        assert!(positions.iter().all(|&p| map(p) == Some(kind)));
+        result.groups.push(GroupedNote { kind, positions });
+    }
+
+    serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
+
     Ok(())
 }
