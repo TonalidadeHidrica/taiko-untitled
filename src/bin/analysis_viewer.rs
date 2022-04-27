@@ -80,6 +80,7 @@ fn main() -> anyhow::Result<()> {
         mouse_over_point: None,
 
         show_grid: false,
+        show_group_index: false,
     };
 
     'main: loop {
@@ -163,6 +164,9 @@ fn main() -> anyhow::Result<()> {
                             )?;
                         }
                     }
+                    Keycode::I => {
+                        app_state.show_group_index = !app_state.show_group_index;
+                    }
                     _ => (),
                 },
                 _ => {}
@@ -191,6 +195,7 @@ struct AppState {
     mouse_over_point: Option<(i64, f64)>,
 
     show_grid: bool,
+    show_group_index: bool,
 }
 impl AppState {
     fn to_x(&self, note_x: f64) -> f64 {
@@ -233,7 +238,7 @@ fn draw(
     canvas.set_draw_color(Color::BLACK);
     canvas.clear();
 
-    for group in data.groups.iter().flat_map(|x| &x.groups) {
+    for (group, i) in data.groups.iter().flat_map(|x| &x.groups).zip(1usize..) {
         canvas.set_draw_color(Color::GREEN);
         let points = group
             .positions
@@ -244,6 +249,37 @@ fn draw(
             .collect_vec();
         canvas.set_draw_color(Color::GREEN);
         canvas.draw_lines(&points[..])?;
+
+        if let (true, Some(first), Some(last)) = (
+            app_state.show_group_index,
+            group.positions.get(0),
+            group.positions.last(),
+        ) {
+            let text_surface = font
+                .render(&i.to_string())
+                .solid(Color::YELLOW)
+                .map_err(|e| e.to_string())?;
+            let (w, h) = (text_surface.width(), text_surface.height());
+            let text_texture = texture_creator
+                .create_texture_from_surface(text_surface)
+                .map_err(|e| e.to_string())?;
+
+            let rect = Rect::new(
+                app_state.to_x(*first.1) as i32,
+                app_state.to_y(first.0) as i32 - h as i32 / 2,
+                w,
+                h,
+            );
+            canvas.copy(&text_texture, None, rect)?;
+
+            let rect = Rect::new(
+                app_state.to_x(*last.1) as i32 - w as i32,
+                app_state.to_y(last.0) as i32 - h as i32 / 2,
+                w,
+                h,
+            );
+            canvas.copy(&text_texture, None, rect)?;
+        }
     }
 
     for (&pts, frame) in &data.positions.results {
