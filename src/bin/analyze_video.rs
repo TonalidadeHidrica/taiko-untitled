@@ -10,7 +10,7 @@ use enum_map::EnumMap;
 use ffmpeg4::{format, frame, media};
 
 use fs_err::File;
-use itertools::Itertools;
+use itertools::{zip, Itertools};
 use ordered_float::NotNan;
 use taiko_untitled::{
     analyze::{detect_note_positions, GroupNotesResult, GroupedNote, NotePositionsResult},
@@ -90,6 +90,22 @@ fn group_notes(args: &GroupNotes) -> anyhow::Result<()> {
             .for_each(|(kind, notes)| map[kind].push((pts, notes)));
     }
 
+    let stop_frames = {
+        let mut stop_frames = BTreeSet::new();
+        for ((_, bef), (&pts, aft)) in result.results.iter().tuple_windows() {
+            if bef.notes.len() != aft.notes.len() || bef.notes.is_empty() {
+                continue;
+            }
+            let all_same = zip(&bef.notes, &aft.notes).all(|(bef, aft)| {
+                bef.kind == aft.kind && (bef.note_x() - aft.note_x()).abs() < 1.0
+            });
+            if all_same {
+                stop_frames.insert(pts);
+            }
+        }
+        stop_frames
+    };
+
     let mut result = GroupNotesResult { groups: vec![] };
     for (kind, frames) in map.iter_mut() {
         for i in 0..frames.len() {
@@ -97,12 +113,11 @@ fn group_notes(args: &GroupNotes) -> anyhow::Result<()> {
             while let Some(&this) = frames[i].1.iter().next() {
                 frames[i].1.remove(&this);
                 let mut frames = frames[i + 1..].iter_mut();
-                let (pts_next, next) = frames
+                let (set, pts_next, next) = frames
                     .by_ref()
                     .find_map(|(pts, set)| {
-                        let &found = set.range(..this).next()?;
-                        set.remove(&found);
-                        Some((*pts, found))
+                        let &next = set.range(..this).next()?;
+                        Some((set, *pts, next))
                     })
                     .with_context(|| {
                         format!(
@@ -110,27 +125,47 @@ fn group_notes(args: &GroupNotes) -> anyhow::Result<()> {
                             pts_this, this
                         )
                     })?;
+                if stop_frames.range(pts_this..=pts_next).next().is_some() {
+                    continue;
+                }
+                set.remove(&next);
                 let mut positions = vec![(pts_this, this), (pts_next, next)];
+                let (mut pts_1, mut note_x_1) = (pts_this, this);
+                let (mut pts_2, mut note_x_2) = (pts_next, next);
+                println!("# {:?}", positions);
                 for (pts, set) in frames {
-                    let (pts_1, note_x_1) = positions[positions.len() - 1];
-                    let (pts_2, note_x_2) = positions[positions.len() - 2];
-                    let note_x = NotNan::new(map_float(
-                        *pts as f64,
-                        pts_1 as f64,
-                        pts_2 as f64,
-                        *note_x_1,
-                        *note_x_2,
-                    ))
-                    .context("NaN")?;
-                    if *note_x < 440.0 {
-                        break;
-                    }
-                    let eps = NotNan::new(16.0).unwrap();
+                    let stop_frame = stop_frames.contains(pts);
+                    let (note_x, eps) = if stop_frame {
+                        (note_x_1, NotNan::new(1.0).unwrap())
+                    } else {
+                        let note_x = NotNan::new(map_float(
+                            *pts as f64,
+                            pts_1 as f64,
+                            pts_2 as f64,
+                            *note_x_1,
+                            *note_x_2,
+                        ))
+                        .context("NaN")?;
+                        if *note_x < 440.0 {
+                            break;
+                        }
+                        let eps = NotNan::new(16.0).unwrap();
+                        (note_x, eps)
+                    };
                     match &set.range(note_x - eps..note_x + eps).take(2).collect_vec()[..] {
                         [] => {}
                         &[&found] => {
+                            println!("  => {:?}", (*pts, found));
                             set.remove(&found);
                             positions.push((*pts, found));
+                            if !stop_frame {
+                                (pts_2, note_x_2) = (pts_1, note_x_1);
+                                (pts_1, note_x_1) = (*pts, found);
+                            } else {
+                                let pts_diff = *pts - pts_1;
+                                pts_1 += pts_diff;
+                                pts_2 += pts_diff;
+                            }
                         }
                         &[&a, &b] => {
                             bail!("Multiple candidates found at pts={pts}: {a}, {b}");

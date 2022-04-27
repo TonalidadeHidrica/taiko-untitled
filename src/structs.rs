@@ -184,19 +184,19 @@ pub enum Level {
     Oni,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Enum)]
 pub struct SingleNoteKind {
     pub color: NoteColor,
     pub size: NoteSize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Enum)]
 pub enum NoteColor {
     Don,
     Ka,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Enum)]
 pub enum NoteSize {
     Small,
     Large,
