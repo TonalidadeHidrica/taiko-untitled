@@ -131,3 +131,15 @@ pub struct GroupedNote {
     pub kind: SingleNoteKind,
     pub positions: Vec<(i64, NotNan<f64>)>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SegmentList {
+    pub kind: SegmentListKind,
+    pub points: Vec<(i64, f64)>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum SegmentListKind {
+    Add,
+    Remove,
+    Measure,
+}

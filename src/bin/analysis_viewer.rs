@@ -17,7 +17,7 @@ use sdl2::{
     video::WindowContext,
 };
 use taiko_untitled::{
-    analyze::{GroupNotesResult, NotePositionsResult},
+    analyze::{GroupNotesResult, NotePositionsResult, SegmentList, SegmentListKind},
     video_analyzer_assets::get_single_note_color,
 };
 
@@ -25,6 +25,7 @@ use taiko_untitled::{
 struct Opts {
     note_positions: PathBuf,
     groups: Option<PathBuf>,
+    save_path: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -119,7 +120,9 @@ fn main() -> anyhow::Result<()> {
                 }
                 Event::MouseButtonDown { .. } => {
                     if let Some(mouse_over_point) = app_state.mouse_over_point {
-                        app_state.selected_points.push(mouse_over_point);
+                        if let Some(p) = app_state.selected_points.last_mut() {
+                            p.points.push(mouse_over_point);
+                        }
                     }
                 }
                 Event::KeyDown {
@@ -127,7 +130,39 @@ fn main() -> anyhow::Result<()> {
                     ..
                 } => match keycode {
                     Keycode::Escape => app_state.selected_points.clear(),
+                    Keycode::Backspace => {
+                        if shift {
+                            app_state.selected_points.pop();
+                        } else if let Some(p) = app_state.selected_points.last_mut() {
+                            p.points.pop();
+                        }
+                    }
+                    Keycode::A | Keycode::R | Keycode::M => {
+                        if let Some(p) = app_state.selected_points.last_mut() {
+                            p.kind = match keycode {
+                                Keycode::A => SegmentListKind::Add,
+                                Keycode::R => SegmentListKind::Remove,
+                                Keycode::M => SegmentListKind::Measure,
+                                _ => unreachable!(),
+                            };
+                        }
+                    }
+                    Keycode::N => app_state.selected_points.push(SegmentList {
+                        kind: SegmentListKind::Measure,
+                        points: vec![],
+                    }),
                     Keycode::G => app_state.show_grid = !app_state.show_grid,
+                    Keycode::Slash if shift => {
+                        println!("{:?}", app_state.selected_points);
+                    }
+                    Keycode::S => {
+                        if let Some(save_path) = &opts.save_path {
+                            serde_json::to_writer(
+                                File::create(save_path)?,
+                                &app_state.selected_points,
+                            )?;
+                        }
+                    }
                     _ => (),
                 },
                 _ => {}
@@ -152,7 +187,7 @@ struct AppState {
     origin_y: f64,
     scale_y: f64,
 
-    selected_points: Vec<(i64, f64)>,
+    selected_points: Vec<SegmentList>,
     mouse_over_point: Option<(i64, f64)>,
 
     show_grid: bool,
@@ -247,32 +282,40 @@ fn draw(
         canvas.copy(&text_texture, None, rect)?;
     }
 
-    canvas.set_draw_color(Color::GREEN);
-    let points = app_state
-        .selected_points
-        .iter()
-        .map(|&(pts, note_x)| Point::new(app_state.to_x(note_x) as i32, app_state.to_y(pts) as i32))
-        .collect_vec();
-    canvas.draw_lines(&points[..])?;
+    for lines in &app_state.selected_points {
+        let color = match lines.kind {
+            SegmentListKind::Add => Color::RED,
+            SegmentListKind::Remove => Color::BLUE,
+            SegmentListKind::Measure => Color::GREEN,
+        };
+        canvas.set_draw_color(color);
+        let points = lines
+            .points
+            .iter()
+            .map(|&(pts, note_x)| {
+                Point::new(app_state.to_x(note_x) as i32, app_state.to_y(pts) as i32)
+            })
+            .collect_vec();
+        canvas.draw_lines(&points[..])?;
 
-    for (((_, note_x_s), &s), ((_, note_x_t), &t)) in app_state
-        .selected_points
-        .iter()
-        .zip(&points)
-        .tuple_windows()
-    {
-        let x = (s.x + t.x) / 2;
-        let y = (s.y + t.y) / 2;
-        let text_surface = font
-            .render(&format!("{:.1}", note_x_s - note_x_t))
-            .solid(Color::WHITE)
-            .map_err(|e| e.to_string())?;
-        let (w, h) = (text_surface.width(), text_surface.height());
-        let text_texture = texture_creator
-            .create_texture_from_surface(text_surface)
-            .map_err(|e| e.to_string())?;
-        let rect = Rect::from_center((x, y), w, h);
-        canvas.copy(&text_texture, None, rect)?;
+        if let SegmentListKind::Measure = lines.kind {
+            for (((_, note_x_s), &s), ((_, note_x_t), &t)) in
+                lines.points.iter().zip(&points).tuple_windows()
+            {
+                let x = (s.x + t.x) / 2;
+                let y = (s.y + t.y) / 2;
+                let text_surface = font
+                    .render(&format!("{:.1}", note_x_s - note_x_t))
+                    .solid(Color::WHITE)
+                    .map_err(|e| e.to_string())?;
+                let (w, h) = (text_surface.width(), text_surface.height());
+                let text_texture = texture_creator
+                    .create_texture_from_surface(text_surface)
+                    .map_err(|e| e.to_string())?;
+                let rect = Rect::from_center((x, y), w, h);
+                canvas.copy(&text_texture, None, rect)?;
+            }
+        }
     }
 
     canvas.present();
