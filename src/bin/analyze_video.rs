@@ -100,7 +100,7 @@ fn group_notes(args: &GroupNotes) -> anyhow::Result<()> {
                 let (pts_next, next) = frames
                     .by_ref()
                     .find_map(|(pts, set)| {
-                        let &found = set.range(..this).last()?;
+                        let &found = set.range(..this).next()?;
                         set.remove(&found);
                         Some((*pts, found))
                     })

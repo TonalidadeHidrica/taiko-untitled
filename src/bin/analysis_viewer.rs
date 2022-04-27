@@ -243,7 +243,7 @@ fn draw(
         let text_texture = texture_creator
             .create_texture_from_surface(text_surface)
             .map_err(|e| e.to_string())?;
-        let rect = Rect::new(x, y, w, h);
+        let rect = Rect::new(x - w as i32, y - h as i32, w, h);
         canvas.copy(&text_texture, None, rect)?;
     }
 
