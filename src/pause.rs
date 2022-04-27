@@ -7,6 +7,7 @@ use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use sdl2::keyboard::Mod;
 use sdl2::render::WindowCanvas;
 use sdl2::EventPump;
 
@@ -18,11 +19,14 @@ use crate::errors::to_sdl_error;
 use crate::errors::TaikoError;
 use crate::game::AutoEvent;
 use crate::game::GameUserState;
+use crate::game_graphics::clear_background;
 use crate::game_graphics::draw_background;
 use crate::game_graphics::draw_bar_lines;
 use crate::game_graphics::draw_branch_overlay;
 use crate::game_graphics::draw_notes;
 use crate::game_graphics::game_rect;
+use crate::game_graphics::get_offsets_rev;
+use crate::game_graphics::shift_rect;
 use crate::game_graphics::BranchAnimationState;
 use crate::structs::just::Score;
 use crate::structs::BranchType;
@@ -72,11 +76,16 @@ pub fn pause(
     audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
     file_change_receiver: &Receiver<notify::DebouncedEvent>,
-    song: &Song,
+    songs: &[Song],
     mut game_user_state: GameUserState,
 ) -> Result<PauseBreak, TaikoError> {
-    let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
-    let score = PausedScore::new(score);
+    let scores = songs
+        .iter()
+        .map(|song| {
+            let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
+            Ok(PausedScore::new(score))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     audio_manager.pause()?;
 
@@ -92,7 +101,7 @@ pub fn pause(
             canvas,
             event_pump,
             assets,
-            &score,
+            &scores,
             &mut music_position,
             &mut branch,
             &mut game_user_state,
@@ -112,7 +121,7 @@ fn pause_loop<E>(
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
     assets: &mut Assets,
-    score: &PausedScore,
+    scores: &[PausedScore],
     music_position: &mut E,
     branch: &mut ValueWithUpdateTime<BranchAnimationState>,
     game_user_state: &mut GameUserState,
@@ -120,93 +129,122 @@ fn pause_loop<E>(
 where
     E: EasingF64,
 {
+    assert!(!scores.is_empty());
     for event in event_pump.poll_iter() {
         match event {
             Event::Quit { .. } => return Ok(Some(PauseBreak::Exit)),
             Event::KeyDown {
                 keycode: Some(keycode),
+                keymod,
                 ..
-            } => match keycode {
-                Keycode::Space => {
-                    game_user_state.time = music_position.get();
-                    return Ok(Some(PauseBreak::Play(*game_user_state)));
+            } => {
+                let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
+                match keycode {
+                    Keycode::Space => {
+                        game_user_state.time = music_position.get();
+                        return Ok(Some(PauseBreak::Play(*game_user_state)));
+                    }
+                    Keycode::Q => {
+                        return Ok(Some(PauseBreak::Reload));
+                    }
+                    Keycode::F1 => game_user_state.auto = !game_user_state.auto,
+                    Keycode::PageDown => music_position.set_with(|x| {
+                        scores[0]
+                            .measure_scroll_points
+                            .range(..OrderedFloat::from(x - 1e-3))
+                            .next_back()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::PageUp => music_position.set_with(|x| {
+                        scores[0]
+                            .measure_scroll_points
+                            .range(OrderedFloat::from(x + 1e-3)..)
+                            .next()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::Left => music_position.set_with(|x| {
+                        scores[0]
+                            .beat_scroll_points
+                            .range(..OrderedFloat::from(x - 1e-3))
+                            .next_back()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::Right => music_position.set_with(|x| {
+                        scores[0]
+                            .beat_scroll_points
+                            .range(OrderedFloat::from(x + 1e-3)..)
+                            .next()
+                            .map_or(x, |x| **x)
+                    }),
+                    Keycode::Up => branch.update(|b| b.set(b.get().saturating_next(), 0.0)),
+                    Keycode::Down => branch.update(|b| b.set(b.get().saturating_prev(), 0.0)),
+                    Keycode::Num1 => {
+                        if shift {
+                            game_user_state.speed =
+                                (game_user_state.speed / 2.0f64.powf(1. / 12.)).max(0.0625)
+                        } else {
+                            game_user_state.speed = iterate(1.0, |x| x / 2.0)
+                                .take_while(|&x| x >= 0.0623)
+                                .find(|&x| x < game_user_state.speed - 1e-6)
+                                .unwrap_or(0.0625);
+                        }
+                        dbg!(game_user_state.speed);
+                    }
+                    Keycode::Num2 => {
+                        if shift {
+                            game_user_state.speed =
+                                (game_user_state.speed * 2.0f64.powf(1. / 12.)).min(1.0)
+                        } else {
+                            game_user_state.speed = iterate(0.0625, |x| x * 2.0)
+                                .take_while(|&x| x <= 1.0001)
+                                .find(|&x| x > game_user_state.speed + 1e-6)
+                                .unwrap_or(1.0);
+                        }
+                        dbg!(game_user_state.speed);
+                    }
+                    _ => {}
                 }
-                Keycode::Q => {
-                    return Ok(Some(PauseBreak::Reload));
-                }
-                Keycode::F1 => game_user_state.auto = !game_user_state.auto,
-                Keycode::PageDown => music_position.set_with(|x| {
-                    score
-                        .measure_scroll_points
-                        .range(..OrderedFloat::from(x - 1e-3))
-                        .next_back()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::PageUp => music_position.set_with(|x| {
-                    score
-                        .measure_scroll_points
-                        .range(OrderedFloat::from(x + 1e-3)..)
-                        .next()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::Left => music_position.set_with(|x| {
-                    score
-                        .beat_scroll_points
-                        .range(..OrderedFloat::from(x - 1e-3))
-                        .next_back()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::Right => music_position.set_with(|x| {
-                    score
-                        .beat_scroll_points
-                        .range(OrderedFloat::from(x + 1e-3)..)
-                        .next()
-                        .map_or(x, |x| **x)
-                }),
-                Keycode::Up => branch.update(|b| b.set(b.get().saturating_next(), 0.0)),
-                Keycode::Down => branch.update(|b| b.set(b.get().saturating_prev(), 0.0)),
-                Keycode::Num1 => {
-                    game_user_state.speed =
-                        (game_user_state.speed / 2.0f64.powf(1. / 12.)).max(0.25)
-                }
-                Keycode::Num2 => {
-                    game_user_state.speed = (game_user_state.speed * 2.0f64.powf(1. / 12.)).min(1.0)
-                }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
 
     let display_position = music_position.get_eased();
 
-    draw_background(canvas, assets).map_err(to_sdl_error("While drawing background"))?;
-    let rect = game_rect();
-    canvas.set_clip_rect(rect);
-    {
-        draw_branch_overlay(
-            canvas,
-            branch.duration_since_update().as_secs_f64(),
-            rect,
-            &branch.get(),
-        )?;
+    clear_background(canvas);
 
-        let bar_lines = score
-            .score
-            .bar_lines
-            .iter()
-            .filter(|x| branch.get().get().matches(x.branch));
-        draw_bar_lines(canvas, display_position, bar_lines)?;
+    for (score, offset_y) in scores.iter().rev().zip(get_offsets_rev(scores.len())) {
+        draw_background(canvas, assets, offset_y)
+            .map_err(to_sdl_error("While drawing background"))?;
 
-        let notes = score
-            .score
-            .notes
-            .iter()
-            .rev()
-            .filter(|x| branch.get().get().matches(x.branch));
-        draw_notes(canvas, assets, display_position, notes)?;
+        let rect = game_rect();
+        canvas.set_clip_rect(shift_rect((0, offset_y), rect));
+        {
+            draw_branch_overlay(
+                canvas,
+                branch.duration_since_update().as_secs_f64(),
+                rect,
+                &branch.get(),
+                offset_y,
+            )?;
+
+            let bar_lines = score
+                .score
+                .bar_lines
+                .iter()
+                .filter(|x| branch.get().get().matches(x.branch));
+            draw_bar_lines(canvas, display_position, bar_lines, offset_y)?;
+
+            let notes = score
+                .score
+                .notes
+                .iter()
+                .rev()
+                .filter(|x| branch.get().get().matches(x.branch));
+            draw_notes(canvas, assets, display_position, notes, offset_y)?;
+        }
+        canvas.set_clip_rect(None);
     }
-    canvas.set_clip_rect(None);
 
     canvas.present();
     if !config.window.vsync {

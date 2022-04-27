@@ -4,11 +4,11 @@ use crate::audio::{AudioManager, SoundEffectSchedule};
 use crate::config::TaikoConfig;
 use crate::errors::no_score_in_tja;
 use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError};
-use crate::game_graphics::game_rect;
 use crate::game_graphics::{
-    draw_background, draw_bar_lines, draw_branch_overlay, draw_combo, draw_flying_notes,
-    draw_gauge, draw_judge_strs, draw_notes,
+    clear_background, draw_background, draw_bar_lines, draw_branch_overlay, draw_combo,
+    draw_flying_notes, draw_gauge, draw_judge_strs, draw_notes, get_offsets_rev,
 };
+use crate::game_graphics::{game_rect, shift_rect};
 use crate::game_manager::{GameManager, OfGameState};
 use crate::mode::GameMode;
 use crate::pause::pause;
@@ -22,7 +22,7 @@ use crate::structs::{
 };
 use crate::tja::load_tja_from_file;
 use crate::utils::to_digits;
-use itertools::{iterate, Itertools};
+use itertools::{iterate, izip, Itertools};
 use notify::RecursiveMode;
 use notify::Watcher;
 use num::clamp;
@@ -60,15 +60,29 @@ pub fn game<P>(
     timer_subsystem: &mut TimerSubsystem,
     audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
-    tja_file_name: P,
+    tja_file_names: &[P],
 ) -> Result<GameMode, TaikoError>
 where
     P: AsRef<Path> + std::fmt::Debug,
 {
-    let mut song = load_tja_from_file(&tja_file_name)
-        .map_err(|e| new_tja_error("Failed to load tja file", e))?;
+    if tja_file_names.is_empty() {
+        println!("At least one tja file name should be specified");
+    }
 
-    if let Some(song_wave_path) = &song.wave {
+    let mut songs = vec![];
+    for tja_file_name in tja_file_names {
+        let song = load_tja_from_file(&tja_file_name)
+            .map_err(|e| new_tja_error("Failed to load tja file", e))?;
+        songs.push(song);
+    }
+
+    for song in &songs[1..] {
+        if song.wave != songs[0].wave {
+            eprintln!("There are different wave file specified in second or later tja file.");
+        }
+    }
+
+    if let Some(song_wave_path) = &songs[0].wave {
         audio_manager.load_music(song_wave_path)?;
     }
     let mut game_user_state = GameUserState {
@@ -79,26 +93,28 @@ where
 
     // File watcher
     let (file_change_sender, file_change_receiver) = mpsc::channel();
-    let _watcher = match notify::watcher(file_change_sender, Duration::from_millis(500)) {
-        Ok(mut watcher) => {
-            if let Err(e) = watcher.watch(&tja_file_name, RecursiveMode::NonRecursive) {
+    let mut watchers = vec![];
+    for tja_file_name in tja_file_names {
+        match notify::watcher(file_change_sender.clone(), Duration::from_millis(500)) {
+            Ok(mut watcher) => {
+                if let Err(e) = watcher.watch(&tja_file_name, RecursiveMode::NonRecursive) {
+                    println!(
+                        "Failed to create file watcher.  The file will not be reloaded automatically."
+                    );
+                    println!("Caused by: {:?}", e);
+                } else {
+                    println!("Start watching {:?}", &tja_file_name);
+                }
+                watchers.push(watcher)
+            }
+            Err(e) => {
                 println!(
                     "Failed to create file watcher.  The file will not be reloaded automatically."
                 );
                 println!("Caused by: {:?}", e);
-            } else {
-                println!("Start watching {:?}", &tja_file_name);
             }
-            Some(watcher)
-        }
-        Err(e) => {
-            println!(
-                "Failed to create file watcher.  The file will not be reloaded automatically."
-            );
-            println!("Caused by: {:?}", e);
-            None
-        }
-    };
+        };
+    }
 
     'entireLoop: loop {
         loop {
@@ -109,7 +125,7 @@ where
                 audio_manager,
                 assets,
                 &file_change_receiver,
-                &song,
+                &songs,
                 game_user_state,
             )? {
                 PauseBreak::Exit => break 'entireLoop Ok(GameMode::Exit),
@@ -118,21 +134,26 @@ where
                     break;
                 }
                 PauseBreak::Reload => {
-                    match load_tja_from_file(&tja_file_name)
-                        .map_err(|e| new_tja_error("Failed to load tja file", e))
-                        .and_then(|song| match song.score {
-                            Some(..) => Ok(song),
-                            None => Err(no_score_in_tja()),
-                        }) {
-                        Ok(new_song) => song = new_song,
-                        Err(e) => {
-                            println!("Failed to load tja file: {:?}", e);
-                        }
-                    };
+                    for (song, tja_file_name) in songs.iter_mut().zip(tja_file_names) {
+                        match load_tja_from_file(&tja_file_name)
+                            .map_err(|e| new_tja_error("Failed to load tja file", e))
+                            .and_then(|song| match song.score {
+                                Some(..) => Ok(song),
+                                None => Err(no_score_in_tja()),
+                            }) {
+                            Ok(new_song) => *song = new_song,
+                            Err(e) => {
+                                println!("Failed to load tja file: {:?}", e);
+                            }
+                        };
+                    }
                 }
             }
         }
-        let score = song.score.as_ref().ok_or_else(no_score_in_tja)?;
+        let scores = songs
+            .iter()
+            .map(|song| song.score.as_ref().ok_or_else(no_score_in_tja))
+            .collect::<Result<Vec<_>, _>>()?;
         match play(
             config,
             canvas,
@@ -141,7 +162,7 @@ where
             timer_subsystem,
             audio_manager,
             assets,
-            score,
+            &scores,
             &mut game_user_state,
         )? {
             GameBreak::Exit => break Ok(GameMode::Exit),
@@ -160,23 +181,36 @@ fn play(
     timer_subsystem: &mut TimerSubsystem,
     audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
-    score: &Score,
+    scores: &[&Score],
     game_user_state: &mut GameUserState,
 ) -> Result<GameBreak, TaikoError> {
-    let mut game_manager = GameManager::new(score);
+    assert!(!scores.is_empty());
+
+    let mut game_managers = scores
+        .iter()
+        .map(|score| GameManager::new(score))
+        .collect_vec();
     let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
     sound_effect_event_watch.set_activated(!game_user_state.auto);
 
     audio_manager.sound_effect_receiver.try_iter().count(); // Consume all
     audio_manager.set_play_speed(game_user_state.speed)?;
     audio_manager.seek(game_user_state.time)?;
-    let mut auto_sent_pointer = 0;
+    let mut auto_sent_pointers = vec![0; scores.len()];
     audio_manager.clear_play_schedules()?;
-    audio_manager.add_play_schedules(generate_audio_schedules(
-        assets,
-        &game_manager.score,
-        &mut auto_sent_pointer,
-    ))?;
+    for (index, (game_manager, auto_sent_pointer)) in game_managers
+        .iter()
+        .zip(auto_sent_pointers.iter_mut())
+        .enumerate()
+    {
+        audio_manager.add_play_schedules(generate_audio_schedules(
+            assets,
+            index,
+            &game_manager.score,
+            auto_sent_pointer,
+        ))?;
+    }
+    audio_manager.sort_play_schedules()?;
     audio_manager.set_play_scheduled(game_user_state.auto)?;
     audio_manager.play()?;
 
@@ -190,10 +224,10 @@ fn play(
             timer_subsystem,
             audio_manager,
             assets,
-            score,
-            &mut game_manager,
+            scores,
+            &mut game_managers,
             &mut sound_effect_event_watch,
-            &mut auto_sent_pointer,
+            &mut auto_sent_pointers,
             &mut game_user_state.auto,
         )? {
             break Ok(res);
@@ -210,12 +244,16 @@ fn game_loop(
     timer_subsystem: &mut TimerSubsystem,
     audio_manager: &AudioManager<AutoEvent>,
     assets: &mut Assets,
-    score: &Score,
-    game_manager: &mut GameManager,
+    scores: &[&Score],
+    game_managers: &mut [GameManager],
     sound_effect_event_watch: &mut EventWatch<SoundEffectCallback>,
-    auto_sent_pointer: &mut usize,
+    auto_sent_pointers: &mut [usize],
     auto: &mut bool,
 ) -> Result<Option<GameBreak>, TaikoError> {
+    assert!(!scores.is_empty());
+    assert!(scores.len() == game_managers.len());
+    assert!(scores.len() == auto_sent_pointers.len());
+
     let music_position = audio_manager.music_position()?;
     let sdl_timestamp = timer_subsystem.ticks();
 
@@ -242,7 +280,7 @@ fn game_loop(
                     if !*auto {
                         process_key_event(
                             keycode,
-                            game_manager,
+                            &mut game_managers[0],
                             music_position,
                             timestamp,
                             sdl_timestamp,
@@ -265,19 +303,43 @@ fn game_loop(
         }
     }
     for response in audio_manager.sound_effect_receiver.try_iter() {
-        game_manager.hit(Some(response.kind.color), response.time);
+        game_managers[response.index].hit(Some(response.kind.color), response.time);
     }
     if let Some(m) = music_position {
-        game_manager.hit(None, m);
+        for game_manager in game_managers.iter_mut() {
+            game_manager.hit(None, m);
+        }
     }
 
-    audio_manager.add_play_schedules(generate_audio_schedules(
-        assets,
-        &game_manager.score,
-        auto_sent_pointer,
-    ))?;
+    for (index, (game_manager, auto_sent_pointer)) in game_managers
+        .iter()
+        .zip(auto_sent_pointers.iter_mut())
+        .enumerate()
+    {
+        audio_manager.add_play_schedules(generate_audio_schedules(
+            assets,
+            index,
+            &game_manager.score,
+            auto_sent_pointer,
+        ))?;
+    }
 
-    draw_game_to_canvas(canvas, assets, score, game_manager, music_position)?;
+    clear_background(canvas);
+
+    for (score, game_manager, offset_y) in izip!(
+        scores.iter().rev(),
+        game_managers.iter_mut().rev(),
+        get_offsets_rev(scores.len()),
+    ) {
+        draw_game_to_canvas(
+            canvas,
+            assets,
+            score,
+            game_manager,
+            music_position,
+            offset_y,
+        )?;
+    }
 
     canvas.present();
     if !config.window.vsync {
@@ -293,41 +355,50 @@ fn draw_game_to_canvas(
     score: &Score,
     game_manager: &mut GameManager,
     music_position: Option<f64>,
+    offset_y: i32,
 ) -> Result<(), TaikoError> {
-    draw_background(canvas, assets).map_err(to_sdl_error("While drawing background"))?;
+    draw_background(canvas, assets, offset_y).map_err(to_sdl_error("While drawing background"))?;
 
     let gauge = game_manager.game_state.gauge;
     let gauge = clamp(gauge, 0.0, 10000.0) as u32 / 200;
-    draw_gauge(canvas, assets, gauge, 39, 50).map_err(|e| new_sdl_error("Failed to drawr", e))?;
+    draw_gauge(canvas, assets, gauge, 39, 50, offset_y)
+        .map_err(|e| new_sdl_error("Failed to drawr", e))?;
 
     if let Some(music_position) = music_position {
         let score_rect = game_rect();
-        canvas.set_clip_rect(score_rect);
+        canvas.set_clip_rect(shift_rect((0, offset_y), score_rect));
         {
             draw_branch_overlay(
                 canvas,
                 music_position,
                 score_rect,
                 &game_manager.animation_state.branch_state,
+                offset_y,
             )?;
 
             let bar_lines =
                 BarLineIterator::new(game_manager.score.branches.iter(), score.bar_lines.iter());
-            draw_bar_lines(canvas, music_position, bar_lines)?;
+            draw_bar_lines(canvas, music_position, bar_lines, offset_y)?;
 
-            draw_game_notes(canvas, assets, music_position, &game_manager.score)?;
+            draw_game_notes(
+                canvas,
+                assets,
+                music_position,
+                &game_manager.score,
+                offset_y,
+            )?;
         }
         canvas.set_clip_rect(None);
 
         let flying_notes = game_manager
             .flying_notes(|note| note.time <= music_position - 0.5) // TODO incomplete refactor
             .rev();
-        draw_flying_notes(canvas, assets, music_position, flying_notes)?;
+        draw_flying_notes(canvas, assets, music_position, flying_notes, offset_y)?;
 
         let judge_strs = game_manager
             .judge_strs(|judge| (music_position - judge.time) * 60.0 >= 18.0)
             .rev();
-        draw_judge_strs(canvas, assets, music_position, judge_strs)?;
+        draw_judge_strs(canvas, assets, music_position, judge_strs, offset_y)?;
 
         let combo = game_manager.game_state.combo;
         if let Some(textures) = match () {
@@ -343,7 +414,7 @@ fn draw_game_to_canvas(
                     .expect("i64 cannot be converted to u64 only if it's negative"),
             );
             let time = music_position - game_manager.animation_state.last_combo_update;
-            draw_combo(canvas, textures, time, digits)?;
+            draw_combo(canvas, textures, time, digits, offset_y)?;
         }
     }
     Ok(())
@@ -450,6 +521,7 @@ pub fn draw_game_notes(
     assets: &Assets,
     music_position: f64,
     score: &ScoreOfGameState,
+    offset_y: i32,
 ) -> Result<(), TaikoError> {
     let mut branches = score.branches.iter().rev().peekable();
     let notes = score.notes.iter().rev();
@@ -503,7 +575,7 @@ pub fn draw_game_notes(
         })
     });
 
-    draw_notes(canvas, assets, music_position, notes)
+    draw_notes(canvas, assets, music_position, notes, offset_y)
 }
 
 fn process_key_event(
@@ -533,6 +605,7 @@ fn process_key_event(
 
 fn generate_audio_schedules(
     assets: &Assets,
+    index: usize,
     score: &ScoreOfGameState,
     auto_sent_pointer: &mut usize,
 ) -> Vec<SoundEffectSchedule<AutoEvent>> {
@@ -569,6 +642,7 @@ fn generate_audio_schedules(
                     source: chunk.new_source(),
                     volume,
                     response: AutoEvent {
+                        index,
                         time: note.time,
                         kind: single_note.kind,
                     },
@@ -583,6 +657,7 @@ fn generate_audio_schedules(
                             source: assets.chunks.sound_don.new_source(),
                             volume: 1.0,
                             response: AutoEvent {
+                                index,
                                 time: t,
                                 kind: SingleNoteKind {
                                     color: NoteColor::Don,
@@ -599,6 +674,7 @@ fn generate_audio_schedules(
 
 #[derive(Debug)]
 pub struct AutoEvent {
+    pub index: usize,
     pub time: f64,
     pub kind: SingleNoteKind,
 }

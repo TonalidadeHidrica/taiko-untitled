@@ -49,6 +49,7 @@ enum MessageToAudio<T> {
     SetPlaySpeed(f64),
 
     AddSchedules(Vec<SoundEffectSchedule<T>>),
+    SortSchedules,
     CleanSchedules,
     SwitchScheduled(bool),
 }
@@ -194,6 +195,15 @@ impl<T: Send + 'static> AudioManager<T> {
             .send(MessageToAudio::AddSchedules(schedules))
             .map_err(|_| TaikoError {
                 message: "Failed to push schedules; the audio stream has been stopped".to_string(),
+                cause: TaikoErrorCause::None,
+            })
+    }
+
+    pub fn sort_play_schedules(&self) -> Result<(), TaikoError> {
+        self.sender_to_audio
+            .send(MessageToAudio::SortSchedules)
+            .map_err(|_| TaikoError {
+                message: "Failed to sort schedules; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
             })
     }
@@ -442,6 +452,13 @@ impl<T> AudioThreadState<T> {
                         });
                         // TODO check for time rollback
                         self.sound_effect_schedules.extend(schedules.into_iter());
+                    }
+                    MessageToAudio::SortSchedules => {
+                        self.sound_effect_schedules
+                            .make_contiguous()
+                            .sort_unstable_by(|x, y| {
+                                x.timestamp.partial_cmp(&y.timestamp).unwrap()
+                            });
                     }
                     MessageToAudio::SwitchScheduled(enabled) => {
                         self.scheduled_play_enabled = enabled;

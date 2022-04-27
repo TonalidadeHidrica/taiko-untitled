@@ -1,3 +1,4 @@
 {
-	"rust-analyzer.assist.importMergeBehaviour": "none"
+	"rust-analyzer.assist.importMergeBehaviour": "none",
+	"rust-analyzer.diagnostics.disabled": ["type-mismatch"]
 }
