@@ -469,7 +469,7 @@ fn main() -> Result<(), MainErr> {
             if let (Some(score), true) = (&score, show_score) {
                 let delta = score_time_delta.unwrap_or_else(|| score_time_deltas.get(pts));
                 let time = f64::from(Rational::new(pts as i32, 1) * time_base) + delta;
-                draw_game_notes(&mut canvas, &game_assets, time, score)
+                draw_game_notes(&mut canvas, &game_assets, time, score, 0)
                     .map_err(|e| MainErr(format!("{:?}", e)))?;
             }
             if show_detected_notes {
