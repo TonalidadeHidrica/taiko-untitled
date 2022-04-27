@@ -13,7 +13,10 @@ use fs_err::File;
 use itertools::{zip, Itertools};
 use ordered_float::NotNan;
 use taiko_untitled::{
-    analyze::{detect_note_positions, GroupNotesResult, GroupedNote, NotePositionsResult},
+    analyze::{
+        detect_note_positions, GroupNotesResult, GroupedNote, NotePositionsResult, SegmentList,
+        SegmentListKind,
+    },
     ffmpeg_utils::{next_frame, FilteredPacketIter},
 };
 
@@ -27,6 +30,7 @@ struct Opts {
 enum Sub {
     VideoToNotePositions(VideoToNotePositions),
     GroupNotes(GroupNotes),
+    FixGroup(FixGroup),
 }
 
 #[derive(Args)]
@@ -41,11 +45,20 @@ struct GroupNotes {
     output_path: PathBuf,
 }
 
+#[derive(Args)]
+struct FixGroup {
+    positions_path: PathBuf,
+    groups_path: PathBuf,
+    fix_path: PathBuf,
+    output_path: PathBuf,
+}
+
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     match &opts.sub {
         Sub::VideoToNotePositions(args) => video_to_note_positions(args),
         Sub::GroupNotes(args) => group_notes(args),
+        Sub::FixGroup(args) => fix_group(args),
     }
 }
 
@@ -185,4 +198,69 @@ fn group_notes(args: &GroupNotes) -> anyhow::Result<()> {
 
 fn map_float(x: f64, sx: f64, tx: f64, sy: f64, ty: f64) -> f64 {
     sy + (x - sx) / (tx - sx) * (ty - sy)
+}
+
+fn fix_group(args: &FixGroup) -> anyhow::Result<()> {
+    let groups: GroupNotesResult =
+        serde_json::from_reader(BufReader::new(File::open(&args.groups_path)?))?;
+    let fix: Vec<SegmentList> =
+        serde_json::from_reader(BufReader::new(File::open(&args.fix_path)?))?;
+
+    // type Vertex = (i64, NotNan<f64>);
+    let mut edges = BTreeMap::<_, Vec<_>>::new();
+    for group in groups.groups {
+        for (s, t) in group.positions.into_iter().tuple_windows() {
+            edges.entry(s).or_default().push(t);
+            edges.entry(t).or_default().push(s);
+        }
+    }
+    for segment in fix {
+        let points = segment
+            .points
+            .into_iter()
+            .map(|(x, y)| (x, NotNan::new(y).unwrap()))
+            .collect_vec();
+        match segment.kind {
+            SegmentListKind::Add => {
+                for (s, t) in points.into_iter().tuple_windows() {
+                    edges.entry(s).or_default().push(t);
+                    edges.entry(t).or_default().push(s);
+                }
+            }
+            SegmentListKind::Remove => {
+                for (s, t) in points.into_iter().tuple_windows() {
+                    let index = edges[&s].iter().position(|x| x == &t).unwrap();
+                    edges.get_mut(&s).unwrap().swap_remove(index);
+                    let index = edges[&t].iter().position(|x| x == &s).unwrap();
+                    edges.get_mut(&t).unwrap().swap_remove(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut paths = vec![];
+    while let Some((&(mut s), es)) = edges.iter().next() {
+        if es.len() > 1 {
+            bail!("{:?} => {:?}", s, es);
+        }
+        let es = edges.remove(&s).unwrap();
+        let mut path = vec![s];
+        if let Some(&(mut t)) = es.get(0) {
+            loop {
+                path.push(t);
+                let es = edges.remove(&t).unwrap();
+                let u = match &es[..] {
+                    [_] => break,
+                    &[u, ss] if s == ss => u,
+                    &[ss, u] if s == ss => u,
+                    es => bail!("{:?} => {:?}", t, es),
+                };
+                (s, t) = (t, u);
+            }
+        }
+        paths.push(path);
+    }
+
+    Ok(())
 }
