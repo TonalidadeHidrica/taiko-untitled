@@ -22,6 +22,7 @@ ffmpeg4 = { git = "https://github.com/TonalidadeHidrica/rust-ffmpeg4", branch = 
 fs-err = "2.7.0"
 itertools = "0.10.2"
 kahan = "0.1.4"
+linreg = "0.2.0"
 maplit = "1.0.2"
 notify = "4.0.15"
 num = "0.4.0"

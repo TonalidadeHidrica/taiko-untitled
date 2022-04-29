@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 use average::{Estimate, Mean};
 use clap::{Args, Parser, Subcommand};
 use enum_map::EnumMap;
@@ -12,13 +12,14 @@ use ffmpeg4::{format, frame, media};
 use fs_err::File;
 use itertools::{zip, Itertools};
 use kahan::KahanSum;
+use linreg::linear_regression_of;
 use maplit::btreemap;
 use num::Integer;
 use ordered_float::NotNan;
 use taiko_untitled::{
     analyze::{
-        detect_note_positions, DetermineFrameTimeResult, GroupNotesResult, GroupedNote,
-        NotePositionsResult, SegmentList, SegmentListKind,
+        detect_note_positions, DetermineFrameTimeResult, DeterminedNote, GroupNotesResult,
+        GroupedNote, NotePositionsResult, SegmentList, SegmentListKind,
     },
     ffmpeg_utils::{next_frame, FilteredPacketIter},
 };
@@ -328,18 +329,7 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         .collect();
     // let mut speeds: BTreeMap<usize, f64>;
     for repetition in 0..args.repetition {
-        let times = {
-            let mut pts = *ptss.iter().next().unwrap();
-            let mut time = 0.0;
-            let mut times = btreemap![pts => time];
-            for (&(s_pts, t_pts), &duration) in &durations {
-                assert_eq!(pts, s_pts);
-                pts = t_pts;
-                time += duration;
-                times.insert(pts, time);
-            }
-            times
-        };
+        let times = make_cumulative_map(&ptss, &durations);
         let mut estimated_durations = BTreeMap::<(i64, i64), Mean>::new();
         let mut error_list = vec![];
         let mut errors = KahanSum::<f64>::new();
@@ -433,11 +423,44 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         segments
     };
 
+    let times = make_cumulative_map(&ptss, &durations);
+    let mut notes = vec![];
+    for group in &groups.groups {
+        let xys = group
+            .positions
+            .iter()
+            .map(|(pts, note_x)| (times[pts], *note_x))
+            .collect_vec();
+        let (a, b) = linear_regression_of(&xys).map_err(|e| anyhow!("{}", e))?;
+        notes.push(DeterminedNote {
+            a,
+            b,
+            kind: group.kind,
+        });
+    }
+
     let result = DetermineFrameTimeResult {
         durations: durations.into_iter().collect_vec(),
         segments,
+        notes,
     };
     serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
 
     Ok(())
+}
+
+fn make_cumulative_map(
+    ptss: &BTreeSet<i64>,
+    durations: &BTreeMap<(i64, i64), f64>,
+) -> BTreeMap<i64, f64> {
+    let mut pts = *ptss.iter().next().unwrap();
+    let mut time = 0.0;
+    let mut times = btreemap![pts => time];
+    for (&(s_pts, t_pts), &duration) in durations {
+        assert_eq!(pts, s_pts);
+        pts = t_pts;
+        time += duration;
+        times.insert(pts, time);
+    }
+    times
 }

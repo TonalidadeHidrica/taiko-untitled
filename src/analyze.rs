@@ -148,4 +148,12 @@ pub enum SegmentListKind {
 pub struct DetermineFrameTimeResult {
     pub durations: Vec<((i64, i64), f64)>,
     pub segments: Vec<(i64, i64)>,
+    pub notes: Vec<DeterminedNote>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeterminedNote {
+    pub kind: SingleNoteKind,
+    pub a: f64,
+    pub b: f64,
 }
