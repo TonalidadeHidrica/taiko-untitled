@@ -21,6 +21,8 @@ enum-map = "2.1.0"
 ffmpeg4 = { git = "https://github.com/TonalidadeHidrica/rust-ffmpeg4", branch = "fix-missing-variable" }
 fs-err = "2.7.0"
 itertools = "0.10.2"
+kahan = "0.1.4"
+maplit = "1.0.2"
 notify = "4.0.15"
 num = "0.4.0"
 once_cell = "1.5.2"

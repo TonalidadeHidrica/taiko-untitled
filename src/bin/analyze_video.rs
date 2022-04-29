@@ -1,7 +1,7 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet},
     io::{BufReader, BufWriter},
-    iter::repeat_with,
+    iter::repeat,
     path::PathBuf,
 };
 
@@ -10,9 +10,11 @@ use average::{Estimate, Mean};
 use clap::{Args, Parser, Subcommand};
 use enum_map::EnumMap;
 use ffmpeg4::{format, frame, media};
-
 use fs_err::File;
 use itertools::{zip, Itertools};
+use kahan::KahanSum;
+use maplit::btreemap;
+use num::Integer;
 use ordered_float::NotNan;
 use taiko_untitled::{
     analyze::{
@@ -317,49 +319,84 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         .iter()
         .flat_map(|x| x.positions.iter().map(|x| x.0))
         .collect();
-    let mut map: BTreeMap<(_, _), _> = ptss
+    let mut durations: BTreeMap<(_, _), _> = ptss
         .iter()
         .copied()
         .tuple_windows()
-        .zip(repeat_with(Vec::new))
+        .zip(repeat(1.0))
         .collect();
-    for group in &groups.groups {
-        for (s, t) in group.positions.iter().tuple_windows() {
-            if let Some(v) = map.get_mut(&(s.0, t.0)) {
-                v.push(s.1 - t.1);
+    // let mut speeds: BTreeMap<usize, f64>;
+    for _ in 0..100 {
+        let times = {
+            let mut pts = *ptss.iter().next().unwrap();
+            let mut time = 0.0;
+            let mut times = btreemap![pts => time];
+            for (&(s_pts, t_pts), &duration) in &durations {
+                assert_eq!(pts, s_pts);
+                pts = t_pts;
+                time += duration;
+                times.insert(pts, time);
+            }
+            times
+        };
+        let mut estimated_durations = BTreeMap::<(i64, i64), Mean>::new();
+        let mut errors = KahanSum::<f64>::new();
+        let mut cnt = 0;
+        for group in &groups.groups {
+            let mut estimates_speeds = vec![];
+            for (&(s_pts, s_x), &(t_pts, t_x)) in group.positions.iter().tuple_windows() {
+                let duration: f64 = times.get(&t_pts).unwrap() - times.get(&s_pts).unwrap();
+                if duration.abs() > 1e-5 {
+                    estimates_speeds.push((t_x - s_x) / duration);
+                }
+            }
+            estimates_speeds.sort();
+            let estimated_speed = {
+                let median = match estimates_speeds.len().div_rem(&2) {
+                    (k, 0) => (estimates_speeds[k] + estimates_speeds[k + 1]) / 2.0,
+                    (k, _) => estimates_speeds[k],
+                };
+                let range = median * 0.8..median * 1.2;
+                let mean = Mean::from_iter(
+                    estimates_speeds
+                        .iter()
+                        .filter_map(|x| range.contains(x).then(|| **x)),
+                );
+                if !mean.is_empty() {
+                    mean.mean()
+                } else {
+                    Mean::from_iter(estimates_speeds.iter().map(|x| **x)).mean()
+                }
+            };
+
+            for (&(s_pts, s_x), &(t_pts, t_x)) in group.positions.iter().tuple_windows() {
+                let delta_x = t_x - s_x;
+                let duration_old = times.get(&t_pts).unwrap() - times.get(&s_pts).unwrap();
+                errors += (delta_x - duration_old * estimated_speed).powi(2);
+                cnt += 1;
+
+                let estimated_duration = delta_x / estimated_speed;
+                for (&pts_range, &segment_old) in
+                    durations.range((s_pts, i64::MIN)..(t_pts, i64::MIN))
+                {
+                    let estimated_duration = if segment_old < 1e-3 {
+                        0.0
+                    } else {
+                        *(estimated_duration * segment_old / duration_old)
+                    };
+                    estimated_durations
+                        .entry(pts_range)
+                        .or_default()
+                        .add(estimated_duration);
+                }
             }
         }
-    }
-    let skip_frames: BTreeSet<_> = map
-        .into_iter()
-        .filter_map(|(k, v)| v.into_iter().all(|x| *x < 1e-3).then(|| k))
-        .collect();
-    let mut ratios = ptss
-        .iter()
-        .copied()
-        .tuple_windows::<(_, _)>()
-        .filter(|x| !skip_frames.contains(x))
-        .tuple_windows::<(_, _)>()
-        .zip(repeat_with(Mean::new))
-        .collect::<BTreeMap<_, _>>();
-    for group in groups.groups {
-        group
-            .positions
-            .into_iter()
-            .tuple_windows::<(_, _)>()
-            .filter_map(|((s_pts, s_note_x), (t_pts, t_note_x))| {
-                let pts = (s_pts, t_pts);
-                (!skip_frames.contains(&pts)).then(|| (pts, (t_note_x - s_note_x)))
-            })
-            .tuple_windows::<(_, _)>()
-            .for_each(|((a, x), (b, y))| {
-                if let Some(v) = ratios.get_mut(&(a, b)) {
-                    v.add(*(x / y));
-                }
-            });
-    }
-    for (k, v) in ratios {
-        println!("{:?} => {:?}", k, (!v.is_empty()).then(|| v.mean()));
+        durations.extend(
+            estimated_durations
+                .iter()
+                .map(|(&pts_range, mean)| (pts_range, mean.mean())),
+        );
+        println!("error = {}", (errors.sum() / cnt as f64).sqrt());
     }
 
     Ok(())
