@@ -1,6 +1,7 @@
 use std::{
     cmp::Reverse,
     collections::{binary_heap::PeekMut, BinaryHeap},
+    fmt::Debug,
     path::PathBuf,
 };
 
@@ -10,6 +11,7 @@ use config::Config;
 
 use fs_err::File;
 use itertools::Itertools;
+use num::Integer;
 use ordered_float::NotNan;
 use sdl2::{
     event::Event,
@@ -65,12 +67,17 @@ fn main() -> anyhow::Result<()> {
 
     let dpi_factor = canvas.window().drawable_size().0 as f64 / canvas.window().size().0 as f64;
 
+    #[allow(clippy::zero_prefixed_literal)]
     let mut app_state = AppState {
         origin_x: 0.0,
         scale_x: 0.05,
 
-        note_hit_x: (523_08700, 5),
+        note_hit_x: PreciseDecimal(523_08700, 5),
+        speed_factor: PreciseDecimal(647_866, 3),
+        speed_error_rate: PreciseDecimal(0_010_000, 6),
+        duration_error_rate: PreciseDecimal(0_100_000, 6),
         cursor_digit: 4,
+        cursor_num: 0,
     };
 
     'main: loop {
@@ -98,10 +105,34 @@ fn main() -> anyhow::Result<()> {
                     keycode: Some(keycode),
                     ..
                 } => match keycode {
-                    Keycode::K => app_state.note_hit_x.0 += 10u64.pow(app_state.cursor_digit as _),
-                    Keycode::J => app_state.note_hit_x.0 -= 10u64.pow(app_state.cursor_digit as _),
-                    Keycode::L => app_state.cursor_digit = (app_state.cursor_digit - 1).clamp(0, 8),
-                    Keycode::H => app_state.cursor_digit = (app_state.cursor_digit + 1).clamp(0, 8),
+                    Keycode::K | Keycode::J => {
+                        if shift {
+                            app_state.cursor_num = if keycode == Keycode::K {
+                                app_state.cursor_num.saturating_sub(1)
+                            } else {
+                                app_state.cursor_num.saturating_add(1)
+                            };
+                            app_state.cursor_num = app_state.cursor_num.clamp(0, 3);
+                        } else {
+                            let pointer = match app_state.cursor_num {
+                                0 => &mut app_state.note_hit_x.0,
+                                1 => &mut app_state.speed_factor.0,
+                                2 => &mut app_state.speed_error_rate.0,
+                                _ => &mut app_state.duration_error_rate.0,
+                            };
+                            if keycode == Keycode::K {
+                                *pointer += 10i64.pow(app_state.cursor_digit as _)
+                            } else {
+                                *pointer -= 10i64.pow(app_state.cursor_digit as _)
+                            };
+                        }
+                    }
+                    Keycode::L => {
+                        app_state.cursor_digit = (app_state.cursor_digit - 1).clamp(0, 12)
+                    }
+                    Keycode::H => {
+                        app_state.cursor_digit = (app_state.cursor_digit + 1).clamp(0, 12)
+                    }
                     _ => {}
                 },
                 _ => {}
@@ -123,8 +154,12 @@ struct AppState {
     origin_x: f64,
     scale_x: f64,
 
-    note_hit_x: (u64, i32),
+    note_hit_x: PreciseDecimal,
+    speed_factor: PreciseDecimal,
+    speed_error_rate: PreciseDecimal,
+    duration_error_rate: PreciseDecimal,
     cursor_digit: i32,
+    cursor_num: usize,
 }
 impl AppState {
     fn to_x(&self, time: f64) -> f64 {
@@ -134,10 +169,21 @@ impl AppState {
     fn x_to_time(&self, x: f64) -> f64 {
         (x - self.origin_x) / self.scale_x
     }
-
-    fn note_hit_x(&self) -> f64 {
-        let (a, b) = self.note_hit_x;
-        a as f64 / 10.0f64.powi(b)
+}
+#[derive(Clone, Copy)]
+struct PreciseDecimal(i64, i32);
+impl PreciseDecimal {
+    fn value(self) -> f64 {
+        self.0 as f64 / 10.0f64.powi(self.1)
+    }
+}
+impl Debug for PreciseDecimal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (a, b) = self.0.abs().div_rem(&10i64.pow(self.1 as _));
+        if self.0 < 0 {
+            f.write_str("-")?;
+        }
+        f.write_fmt(format_args!("{}.{:0width$}", a, b, width = self.1 as _))
     }
 }
 
@@ -158,7 +204,7 @@ fn draw(
         .map(|note| {
             (
                 note,
-                NotNan::new((app_state.note_hit_x() - note.b) / note.a).unwrap(),
+                NotNan::new((app_state.note_hit_x.value() - note.b) / note.a).unwrap(),
             )
         })
         .sorted_by_key(|x| x.1)
@@ -172,6 +218,18 @@ fn draw(
         let rect = Rect::from_center((x as i32, 200), 9, 9);
         canvas.set_draw_color(get_single_note_color(note.kind));
         canvas.fill_rect(rect)?;
+
+        let speed = -note.a * app_state.speed_factor.value();
+        draw_range_text(
+            canvas,
+            texture_creator,
+            font,
+            speed,
+            app_state.speed_error_rate,
+            (x as i32, 270),
+            Color::GREEN,
+            3,
+        )?;
     }
 
     {
@@ -185,15 +243,8 @@ fn draw(
                 continue;
             }
             let x = (sx + tx) as i32 / 2;
-            let text_surface = font
-                .render(&format!("{:.3}", beat))
-                .solid(Color::YELLOW)
-                .map_err(|e| e.to_string())?;
-            let (w, h) = (text_surface.width(), text_surface.height());
-            let text_texture = texture_creator
-                .create_texture_from_surface(text_surface)
-                .map_err(|e| e.to_string())?;
-            let half_w = w as i32 / 2 + 5;
+            // let half_w = w as i32 / 2 + 5;
+            let half_w = 60;
             let heap_len = heap.len();
             let slot = match heap.peek_mut() {
                 None => 0,
@@ -201,12 +252,21 @@ fn draw(
                 _ => heap_len,
             };
             heap.push((Reverse(x + half_w), slot));
-            let y = 250 + 30 * slot as i32;
+            let y = 450 + 108 * slot as i32;
             let rect = Rect::new(sx as i32, y - 5, (tx - sx) as u32, 10);
             canvas.set_draw_color(Color::GRAY);
             canvas.draw_rect(rect)?;
-            let rect = Rect::from_center((x, y), w, h);
-            canvas.copy(&text_texture, None, rect)?;
+
+            draw_range_text(
+                canvas,
+                texture_creator,
+                font,
+                *beat,
+                app_state.duration_error_rate,
+                (x, y),
+                Color::YELLOW,
+                3,
+            )?;
         }
     }
 
@@ -219,18 +279,63 @@ fn draw(
     }
 
     {
+        let messages = [
+            format!("note_hit_x = {:?}", app_state.note_hit_x),
+            format!("speed_factor = {:?}", app_state.speed_factor),
+            format!("speed_error_rate = {:?} %", app_state.speed_error_rate),
+            format!(
+                "duration_error_rate = {:?} %",
+                app_state.duration_error_rate
+            ),
+        ];
+        let mut y = 0;
+        for message in messages {
+            let text_surface = font
+                .render(&message)
+                .solid(Color::WHITE)
+                .map_err(|e| e.to_string())?;
+            let (w, h) = (text_surface.width(), text_surface.height());
+            let text_texture = texture_creator
+                .create_texture_from_surface(text_surface)
+                .map_err(|e| e.to_string())?;
+            let rect = Rect::new(0, y, w, h);
+            canvas.copy(&text_texture, None, rect)?;
+            y += h as i32;
+        }
+    }
+
+    canvas.present();
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_range_text(
+    canvas: &mut WindowCanvas,
+    texture_creator: &TextureCreator<WindowContext>,
+    font: &Font,
+    value: f64,
+    error_rate: PreciseDecimal,
+    (x, y): (i32, i32),
+    color: Color,
+    width: usize,
+) -> Result<(), String> {
+    let rate = error_rate.value() / 100.;
+    let dark = Color::RGB(color.r / 2, color.g / 2, color.b / 2);
+    for (value, y, color) in [
+        (value * (1. - rate), y - 36, dark),
+        (value, y, color),
+        (value * (1. + rate), y + 36, dark),
+    ] {
         let text_surface = font
-            .render(&format!("note_hit_x = {:.5}", app_state.note_hit_x()))
-            .solid(Color::WHITE)
+            .render(&format!("{:.width$}", value, width = width))
+            .solid(color)
             .map_err(|e| e.to_string())?;
         let (w, h) = (text_surface.width(), text_surface.height());
         let text_texture = texture_creator
             .create_texture_from_surface(text_surface)
             .map_err(|e| e.to_string())?;
-        let rect = Rect::new(0, 0, w, h);
+        let rect = Rect::from_center((x, y), w, h);
         canvas.copy(&text_texture, None, rect)?;
     }
-
-    canvas.present();
     Ok(())
 }
