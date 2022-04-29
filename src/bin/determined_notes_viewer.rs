@@ -210,7 +210,7 @@ fn draw(
         .sorted_by_key(|x| x.1)
         .collect_vec();
 
-    for &(note, t) in &notes {
+    for (&(note, t), i) in notes.iter().zip(1..) {
         let x = app_state.to_x(*t);
         if x + 100.0 < 0.0 || 2880.0 < x - 100.0 {
             continue;
@@ -230,6 +230,17 @@ fn draw(
             Color::GREEN,
             3,
         )?;
+
+        let text_surface = font
+            .render(&i.to_string())
+            .solid(Color::WHITE)
+            .map_err(|e| e.to_string())?;
+        let (w, h) = (text_surface.width(), text_surface.height());
+        let text_texture = texture_creator
+            .create_texture_from_surface(text_surface)
+            .map_err(|e| e.to_string())?;
+        let rect = Rect::from_center((x as i32, 175), w, h);
+        canvas.copy(&text_texture, None, rect)?;
     }
 
     {
