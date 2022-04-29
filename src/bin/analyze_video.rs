@@ -311,54 +311,5 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
     let groups: GroupNotesResult =
         serde_json::from_reader(BufReader::new(File::open(&args.groups_path)?))?;
 
-    let mut starts_continues = BTreeMap::<_, Vec<_>>::new();
-    for (i, group) in groups.groups.iter().enumerate() {
-        for (&s, &t) in group.positions.iter().tuple_windows() {
-            starts_continues.entry(t.0).or_default().push((i, s, t));
-        }
-    }
-
-    let mut speed_map = BTreeMap::<usize, f64>::new();
-    let mut times = BTreeMap::<i64, f64>::new();
-    for (pts, pairs) in starts_continues {
-        let mut preferred_times = Mean::new();
-        for &(i, (s_pts, s_note_x), (t_pts, t_note_x)) in &pairs {
-            assert_eq!(t_pts, pts);
-            if let Some(&speed) = speed_map.get(&i) {
-                // speed = *(t_note_x - s_note_x) / (preferred_time - time(s_pts))
-                // preferred_time = *(t_note_x - s_note_x) / speed + time(s_pts)
-                // times[s_pts] present because it is already inserted in starts
-                let preferred_time = *(t_note_x - s_note_x) / speed + times[&s_pts];
-                preferred_times.add(preferred_time);
-            }
-        }
-        if !preferred_times.is_empty() {
-            times.insert(pts, preferred_times.mean());
-        }
-        for &(i, (s_pts, s_note_x), (t_pts, t_note_x)) in &pairs {
-            assert_eq!(t_pts, pts);
-            if let Entry::Vacant(entry) = speed_map.entry(i) {
-                let (s_time, t_time) = match (times.get(&s_pts), times.get(&t_pts)) {
-                    (None, None) => {
-                        times.insert(s_pts, 0.0);
-                        times.insert(t_pts, 1.0);
-                        (0.0, 1.0)
-                    }
-                    (Some(&s_time), None) => {
-                        println!("Maybe inappropriate at {}", pts);
-                        let t_time = s_time + 1.0;
-                        times.insert(t_pts, t_time);
-                        (s_time, t_time)
-                    }
-                    (Some(&s_time), Some(&t_time)) => (s_time, t_time),
-                    (None, Some(&_)) => {
-                        println!("Inappropriate at {}, skipping", pts);
-                        continue;
-                    }
-                };
-                entry.insert(*(t_note_x - s_note_x) / (t_time - s_time));
-            }
-        }
-    }
     Ok(())
 }
