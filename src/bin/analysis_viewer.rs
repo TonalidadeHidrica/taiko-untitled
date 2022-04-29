@@ -398,7 +398,7 @@ fn draw(
         canvas.fill_rect(rect)?;
 
         let text_surface = font
-            .render(&format!("{:.5}", duration))
+            .render(&format!("{:.2}", duration))
             .solid(Color::YELLOW)
             .map_err(|e| e.to_string())?;
         let (w, h) = (text_surface.width(), text_surface.height());

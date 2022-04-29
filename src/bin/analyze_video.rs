@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufReader, BufWriter},
-    iter::repeat,
     path::PathBuf,
 };
 
@@ -18,8 +17,8 @@ use num::Integer;
 use ordered_float::NotNan;
 use taiko_untitled::{
     analyze::{
-        detect_note_positions, GroupNotesResult, GroupedNote, NotePositionsResult, SegmentList,
-        SegmentListKind, DetermineFrameTimeResult,
+        detect_note_positions, DetermineFrameTimeResult, GroupNotesResult, GroupedNote,
+        NotePositionsResult, SegmentList, SegmentListKind,
     },
     ffmpeg_utils::{next_frame, FilteredPacketIter},
 };
@@ -63,6 +62,7 @@ struct DetermineFrameTime {
     positions_path: PathBuf,
     groups_path: PathBuf,
     output_path: PathBuf,
+    repetition: usize,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -320,14 +320,14 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         .iter()
         .flat_map(|x| x.positions.iter().map(|x| x.0))
         .collect();
-    let mut durations: BTreeMap<(_, _), _> = ptss
+    let mut durations: BTreeMap<_, _> = ptss
         .iter()
         .copied()
         .tuple_windows()
-        .zip(repeat(1.0))
+        .map(|(s, t)| ((s, t), (t - s) as f64))
         .collect();
     // let mut speeds: BTreeMap<usize, f64>;
-    for _ in 0..100 {
+    for repetition in 0..args.repetition {
         let times = {
             let mut pts = *ptss.iter().next().unwrap();
             let mut time = 0.0;
@@ -404,13 +404,15 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         // let preview = durations.iter().take(20).collect_vec();
         error_list.sort_by_key(|&x| std::cmp::Reverse(x));
         println!(
-            "avg = {:.5}\tmax = {:?}",
+            "{repetition:>3}: avg = {:.5}\tmax = {:?}",
             (errors.sum() / cnt as f64).sqrt(),
             &error_list[0..10]
         );
     }
 
-    let result = DetermineFrameTimeResult { durations: durations.into_iter().collect_vec() };
+    let result = DetermineFrameTimeResult {
+        durations: durations.into_iter().collect_vec(),
+    };
     serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
 
     Ok(())
