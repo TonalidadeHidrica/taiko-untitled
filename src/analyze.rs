@@ -143,3 +143,8 @@ pub enum SegmentListKind {
     Remove,
     Measure,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DetermineFrameTimeResult {
+    pub durations: Vec<((i64, i64), f64)>,
+}

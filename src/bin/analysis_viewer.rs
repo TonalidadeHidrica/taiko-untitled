@@ -17,7 +17,10 @@ use sdl2::{
     video::WindowContext,
 };
 use taiko_untitled::{
-    analyze::{GroupNotesResult, NotePositionsResult, SegmentList, SegmentListKind},
+    analyze::{
+        DetermineFrameTimeResult, GroupNotesResult, NotePositionsResult, SegmentList,
+        SegmentListKind,
+    },
     video_analyzer_assets::get_single_note_color,
 };
 
@@ -26,6 +29,8 @@ struct Opts {
     note_positions: PathBuf,
     groups: Option<PathBuf>,
     save_path: Option<PathBuf>,
+    #[clap(long = "durations")]
+    durations: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -40,6 +45,11 @@ fn main() -> anyhow::Result<()> {
         positions: serde_json::from_reader(File::open(&opts.note_positions)?)?,
         groups: opts
             .groups
+            .as_ref()
+            .map(|p| anyhow::Ok(serde_json::from_reader(File::open(p)?)?))
+            .transpose()?,
+        durations: opts
+            .durations
             .as_ref()
             .map(|p| anyhow::Ok(serde_json::from_reader(File::open(p)?)?))
             .transpose()?,
@@ -81,6 +91,7 @@ fn main() -> anyhow::Result<()> {
 
         show_grid: false,
         show_group_index: false,
+        show_delta_x_on_notes: false,
     };
 
     'main: loop {
@@ -167,6 +178,9 @@ fn main() -> anyhow::Result<()> {
                     Keycode::I => {
                         app_state.show_group_index = !app_state.show_group_index;
                     }
+                    Keycode::X => {
+                        app_state.show_delta_x_on_notes = !app_state.show_delta_x_on_notes;
+                    }
                     _ => (),
                 },
                 _ => {}
@@ -183,6 +197,7 @@ fn main() -> anyhow::Result<()> {
 struct AppData {
     positions: NotePositionsResult,
     groups: Option<GroupNotesResult>,
+    durations: Option<DetermineFrameTimeResult>,
 }
 
 struct AppState {
@@ -196,6 +211,7 @@ struct AppState {
 
     show_grid: bool,
     show_group_index: bool,
+    show_delta_x_on_notes: bool,
 }
 impl AppState {
     fn to_x(&self, note_x: f64) -> f64 {
@@ -247,6 +263,13 @@ fn draw(
                 Point::new(app_state.to_x(*note_x) as i32, app_state.to_y(pts) as i32)
             })
             .collect_vec();
+        if points.iter().all(|p| p.x < 0)
+            || points.iter().all(|p| p.x > 2880)
+            || points.iter().all(|p| p.y < 0)
+            || points.iter().all(|p| p.y > 1620)
+        {
+            continue;
+        }
         canvas.set_draw_color(Color::GREEN);
         canvas.draw_lines(&points[..])?;
 
@@ -279,6 +302,16 @@ fn draw(
                 h,
             );
             canvas.copy(&text_texture, None, rect)?;
+        }
+
+        if app_state.show_delta_x_on_notes {
+            draw_delta_x(
+                canvas,
+                texture_creator,
+                font,
+                group.positions.iter().map(|&(pts, note_x)| (pts, *note_x)),
+                &points,
+            )?;
         }
     }
 
@@ -335,26 +368,75 @@ fn draw(
         canvas.draw_lines(&points[..])?;
 
         if let SegmentListKind::Measure = lines.kind {
-            for (((_, note_x_s), &s), ((_, note_x_t), &t)) in
-                lines.points.iter().zip(&points).tuple_windows()
-            {
-                let x = (s.x + t.x) / 2;
-                let y = (s.y + t.y) / 2;
-                let text_surface = font
-                    .render(&format!("{:.1}", note_x_s - note_x_t))
-                    .solid(Color::WHITE)
-                    .map_err(|e| e.to_string())?;
-                let (w, h) = (text_surface.width(), text_surface.height());
-                let text_texture = texture_creator
-                    .create_texture_from_surface(text_surface)
-                    .map_err(|e| e.to_string())?;
-                let rect = Rect::from_center((x, y), w, h);
-                canvas.copy(&text_texture, None, rect)?;
-            }
+            draw_delta_x(
+                canvas,
+                texture_creator,
+                font,
+                lines.points.iter().copied(),
+                &points,
+            )?;
         }
     }
 
+    let mut last_y = -100i32;
+    for (i, &((s_pts, t_pts), duration)) in
+        data.durations.iter().flat_map(|x| &x.durations).enumerate()
+    {
+        let x = 100 + i as i32 % 2 * 30;
+        let sy = app_state.to_y(s_pts) as i32;
+        let ty = app_state.to_y(t_pts) as i32;
+        if ty < 0 || 1620 < sy {
+            continue;
+        }
+        if sy - last_y < 20 {
+            continue;
+        }
+        last_y = sy;
+
+        let rect = Rect::new(x, sy, 10, (ty - sy) as u32);
+        canvas.set_draw_color(Color::GRAY);
+        canvas.fill_rect(rect)?;
+
+        let text_surface = font
+            .render(&format!("{:.5}", duration))
+            .solid(Color::YELLOW)
+            .map_err(|e| e.to_string())?;
+        let (w, h) = (text_surface.width(), text_surface.height());
+        let text_texture = texture_creator
+            .create_texture_from_surface(text_surface)
+            .map_err(|e| e.to_string())?;
+        let rect = Rect::from_center((x, (sy + ty) / 2), w, h);
+        canvas.copy(&text_texture, None, rect)?;
+    }
+
     canvas.present();
+    Ok(())
+}
+
+fn draw_delta_x<I>(
+    canvas: &mut WindowCanvas,
+    texture_creator: &TextureCreator<WindowContext>,
+    font: &Font,
+    lines_points: I,
+    points: &[Point],
+) -> Result<(), String>
+where
+    I: Iterator<Item = (i64, f64)>,
+{
+    for (((_, note_x_s), &s), ((_, note_x_t), &t)) in lines_points.zip(points).tuple_windows() {
+        let x = (s.x + t.x) / 2;
+        let y = (s.y + t.y) / 2;
+        let text_surface = font
+            .render(&format!("{:.1}", note_x_s - note_x_t))
+            .solid(Color::WHITE)
+            .map_err(|e| e.to_string())?;
+        let (w, h) = (text_surface.width(), text_surface.height());
+        let text_texture = texture_creator
+            .create_texture_from_surface(text_surface)
+            .map_err(|e| e.to_string())?;
+        let rect = Rect::from_center((x, y), w, h);
+        canvas.copy(&text_texture, None, rect)?;
+    }
     Ok(())
 }
 

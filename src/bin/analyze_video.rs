@@ -19,7 +19,7 @@ use ordered_float::NotNan;
 use taiko_untitled::{
     analyze::{
         detect_note_positions, GroupNotesResult, GroupedNote, NotePositionsResult, SegmentList,
-        SegmentListKind,
+        SegmentListKind, DetermineFrameTimeResult,
     },
     ffmpeg_utils::{next_frame, FilteredPacketIter},
 };
@@ -62,6 +62,7 @@ struct FixGroup {
 struct DetermineFrameTime {
     positions_path: PathBuf,
     groups_path: PathBuf,
+    output_path: PathBuf,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -402,8 +403,15 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         // let smalls = durations.iter().filter(|x| *x.1 < 1e-3 || x.1.is_nan()).collect_vec();
         // let preview = durations.iter().take(20).collect_vec();
         error_list.sort_by_key(|&x| std::cmp::Reverse(x));
-        println!("avg = {:.5}\tmax = {:?}", (errors.sum() / cnt as f64).sqrt(), &error_list[0..10]);
+        println!(
+            "avg = {:.5}\tmax = {:?}",
+            (errors.sum() / cnt as f64).sqrt(),
+            &error_list[0..10]
+        );
     }
+
+    let result = DetermineFrameTimeResult { durations: durations.into_iter().collect_vec() };
+    serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
 
     Ok(())
 }
