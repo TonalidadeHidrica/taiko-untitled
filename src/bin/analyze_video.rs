@@ -400,6 +400,22 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         );
     }
 
+    let times = make_cumulative_map(&ptss, &durations);
+    let mut notes = vec![];
+    for group in &groups.groups {
+        let xys = group
+            .positions
+            .iter()
+            .map(|(pts, note_x)| (times[pts], *note_x))
+            .collect_vec();
+        let (a, b) = linear_regression_of(&xys).map_err(|e| anyhow!("{}", e))?;
+        notes.push(DeterminedNote {
+            a,
+            b,
+            kind: group.kind,
+        });
+    }
+
     let segments = {
         let mut map = BTreeMap::<_, isize>::new();
         for group in groups.groups.iter() {
@@ -417,27 +433,14 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
             }
             cnt += delta;
             if cnt == 0 {
-                segments.push((start, pts));
+                let end = pts;
+                let times = (times[&start], times[&end]);
+                segments.push(((start, end), times));
             }
         }
         segments
     };
 
-    let times = make_cumulative_map(&ptss, &durations);
-    let mut notes = vec![];
-    for group in &groups.groups {
-        let xys = group
-            .positions
-            .iter()
-            .map(|(pts, note_x)| (times[pts], *note_x))
-            .collect_vec();
-        let (a, b) = linear_regression_of(&xys).map_err(|e| anyhow!("{}", e))?;
-        notes.push(DeterminedNote {
-            a,
-            b,
-            kind: group.kind,
-        });
-    }
 
     let result = DetermineFrameTimeResult {
         durations: durations.into_iter().collect_vec(),

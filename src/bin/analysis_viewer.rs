@@ -21,6 +21,7 @@ use taiko_untitled::{
         DetermineFrameTimeResult, GroupNotesResult, NotePositionsResult, SegmentList,
         SegmentListKind,
     },
+    sdl2_utils::enable_momentum_scroll,
     video_analyzer_assets::get_single_note_color,
 };
 
@@ -38,7 +39,6 @@ fn main() -> anyhow::Result<()> {
     let mut config = Config::default();
     let config = config.merge(config::File::with_name("config.toml"))?;
 
-    #[cfg(target_os = "macos")]
     enable_momentum_scroll();
 
     let data = AppData {
@@ -438,28 +438,4 @@ where
         canvas.copy(&text_texture, None, rect)?;
     }
     Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn enable_momentum_scroll() {
-    use libc::c_void;
-    use objc::{
-        class, msg_send,
-        runtime::{Object, YES},
-        sel, sel_impl,
-    };
-
-    const KEY: &str = "AppleMomentumScrollSupported";
-    let string: *mut Object = unsafe { msg_send![class!(NSString), alloc] };
-    let key: *mut Object = unsafe {
-        msg_send![
-            string,
-            initWithBytes: KEY.as_ptr() as *const c_void
-            length: KEY.len() as u32
-            encoding: 4u32
-        ]
-    };
-    let defaults: *mut Object = unsafe { msg_send![class!(NSUserDefaults), standardUserDefaults] };
-    let _: () = unsafe { msg_send![defaults, setBool: YES forKey: key] };
-    let _: () = unsafe { msg_send![key, release] };
 }
