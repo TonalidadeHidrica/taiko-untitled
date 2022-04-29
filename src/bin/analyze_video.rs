@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{bail, Context};
+use average::{Estimate, Mean};
 use clap::{Args, Parser, Subcommand};
 use enum_map::EnumMap;
 use ffmpeg4::{format, frame, media};
@@ -31,6 +32,7 @@ enum Sub {
     VideoToNotePositions(VideoToNotePositions),
     GroupNotes(GroupNotes),
     FixGroup(FixGroup),
+    DetermineFrameTime(DetermineFrameTime),
 }
 
 #[derive(Args)]
@@ -53,12 +55,19 @@ struct FixGroup {
     output_path: PathBuf,
 }
 
+#[derive(Args)]
+struct DetermineFrameTime {
+    positions_path: PathBuf,
+    groups_path: PathBuf,
+}
+
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     match &opts.sub {
         Sub::VideoToNotePositions(args) => video_to_note_positions(args),
         Sub::GroupNotes(args) => group_notes(args),
         Sub::FixGroup(args) => fix_group(args),
+        Sub::DetermineFrameTime(args) => determine_frame_time(args),
     }
 }
 
@@ -293,5 +302,61 @@ fn fix_group(args: &FixGroup) -> anyhow::Result<()> {
 
     serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
 
+    Ok(())
+}
+
+fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
+    let _positions: NotePositionsResult =
+        serde_json::from_reader(BufReader::new(File::open(&args.positions_path)?))?;
+    let groups: GroupNotesResult =
+        serde_json::from_reader(BufReader::new(File::open(&args.groups_path)?))?;
+
+    let mut starts_continues = BTreeMap::<_, (Vec<_>, Vec<_>)>::new();
+    for (i, group) in groups.groups.iter().enumerate() {
+        let mut pairs = group.positions.iter().tuple_windows();
+        if let Some((&s, &t)) = pairs.next() {
+            starts_continues.entry(t.0).or_default().0.push((i, s, t));
+        }
+        for (&s, &t) in pairs {
+            starts_continues.entry(t.0).or_default().1.push((i, s, t));
+        }
+    }
+
+    let mut speed_map = BTreeMap::<usize, f64>::new();
+    let mut times = BTreeMap::<i64, f64>::new();
+    for (pts, (starts, continues)) in starts_continues {
+        let mut preferred_times = Mean::new();
+        for (i, (s_pts, s_note_x), (t_pts, t_note_x)) in continues {
+            assert_eq!(t_pts, pts);
+            let speed = speed_map.get(&i).expect("todo");
+            // speed = *(t_note_x - s_note_x) / (preferred_time - time(s_pts))
+            // preferred_time = *(t_note_x - s_note_x) / speed + time(s_pts)
+            // times[s_pts] present because it is already inserted in starts
+            let preferred_time = *(t_note_x - s_note_x) / speed + times[&s_pts];
+            preferred_times.add(preferred_time);
+        }
+        if !preferred_times.is_empty() {
+            times.insert(dbg!(pts), dbg!(preferred_times.mean()));
+        }
+        for (i, (s_pts, s_note_x), (t_pts, t_note_x)) in starts {
+            assert_eq!(t_pts, pts);
+            let (s_time, t_time) = match (times.get(&s_pts), times.get(&t_pts)) {
+                (None, None) => {
+                    times.insert(dbg!(s_pts), dbg!(0.0));
+                    times.insert(dbg!(t_pts), dbg!(1.0));
+                    (0.0, 1.0)
+                }
+                (Some(&s_time), None) => {
+                    // preliminary
+                    let t_time = s_time + 1.0;
+                    times.insert(dbg!(t_pts), dbg!(t_time));
+                    (s_time, t_time)
+                }
+                (Some(&s_time), Some(&t_time)) => (s_time, t_time),
+                _ => bail!("Unuexpected"),
+            };
+            speed_map.insert(i, *(t_note_x - s_note_x) / (t_time - s_time));
+        }
+    }
     Ok(())
 }
