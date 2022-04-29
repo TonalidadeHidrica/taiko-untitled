@@ -441,7 +441,6 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         segments
     };
 
-
     let result = DetermineFrameTimeResult {
         durations: durations.into_iter().collect_vec(),
         segments,

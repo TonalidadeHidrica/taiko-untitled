@@ -1,7 +1,7 @@
 pub mod analyze;
 pub mod ffmpeg_utils;
-pub mod video_analyzer_assets;
 pub mod sdl2_utils;
+pub mod video_analyzer_assets;
 
 #[macro_use]
 pub mod structs;

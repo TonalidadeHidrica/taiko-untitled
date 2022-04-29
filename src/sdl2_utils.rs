@@ -22,7 +22,5 @@ pub fn enable_momentum_scroll() {
     let _: () = unsafe { msg_send![key, release] };
 }
 
-
-#[cfg(not(target_os="macos"))]
-pub fn enable_momentum_scroll() {
-}
+#[cfg(not(target_os = "macos"))]
+pub fn enable_momentum_scroll() {}

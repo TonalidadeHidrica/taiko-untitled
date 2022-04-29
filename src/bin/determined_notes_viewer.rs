@@ -1,17 +1,24 @@
-use std::path::PathBuf;
+use std::{
+    cmp::Reverse,
+    collections::{binary_heap::PeekMut, BinaryHeap},
+    path::PathBuf,
+};
 
 use anyhow::anyhow;
 use clap::Parser;
 use config::Config;
 
 use fs_err::File;
+use itertools::Itertools;
+use ordered_float::NotNan;
 use sdl2::{
     event::Event,
+    keyboard::{Keycode, Scancode},
     pixels::Color,
     rect::Rect,
     render::{TextureCreator, WindowCanvas},
     ttf::Font,
-    video::WindowContext, keyboard::Scancode,
+    video::WindowContext,
 };
 use taiko_untitled::{
     analyze::DetermineFrameTimeResult, sdl2_utils::enable_momentum_scroll,
@@ -62,7 +69,8 @@ fn main() -> anyhow::Result<()> {
         origin_x: 0.0,
         scale_x: 0.05,
 
-        note_hit_x: 522.5,
+        note_hit_x: (523_08700, 5),
+        cursor_digit: 4,
     };
 
     'main: loop {
@@ -86,6 +94,16 @@ fn main() -> anyhow::Result<()> {
                         app_state.origin_x -= x * 10.0;
                     }
                 }
+                Event::KeyDown {
+                    keycode: Some(keycode),
+                    ..
+                } => match keycode {
+                    Keycode::K => app_state.note_hit_x.0 += 10u64.pow(app_state.cursor_digit as _),
+                    Keycode::J => app_state.note_hit_x.0 -= 10u64.pow(app_state.cursor_digit as _),
+                    Keycode::L => app_state.cursor_digit = (app_state.cursor_digit - 1).clamp(0, 8),
+                    Keycode::H => app_state.cursor_digit = (app_state.cursor_digit + 1).clamp(0, 8),
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -105,14 +123,21 @@ struct AppState {
     origin_x: f64,
     scale_x: f64,
 
-    note_hit_x: f64,
+    note_hit_x: (u64, i32),
+    cursor_digit: i32,
 }
 impl AppState {
     fn to_x(&self, time: f64) -> f64 {
         self.origin_x + time * self.scale_x
     }
+    #[allow(unused)]
     fn x_to_time(&self, x: f64) -> f64 {
         (x - self.origin_x) / self.scale_x
+    }
+
+    fn note_hit_x(&self) -> f64 {
+        let (a, b) = self.note_hit_x;
+        a as f64 / 10.0f64.powi(b)
     }
 }
 
@@ -126,8 +151,21 @@ fn draw(
     canvas.set_draw_color(Color::BLACK);
     canvas.clear();
 
-    for note in &data.determined.notes {
-        let x = app_state.to_x((app_state.note_hit_x - note.b) / note.a);
+    let notes = data
+        .determined
+        .notes
+        .iter()
+        .map(|note| {
+            (
+                note,
+                NotNan::new((app_state.note_hit_x() - note.b) / note.a).unwrap(),
+            )
+        })
+        .sorted_by_key(|x| x.1)
+        .collect_vec();
+
+    for &(note, t) in &notes {
+        let x = app_state.to_x(*t);
         if x + 100.0 < 0.0 || 2880.0 < x - 100.0 {
             continue;
         }
@@ -135,12 +173,62 @@ fn draw(
         canvas.set_draw_color(get_single_note_color(note.kind));
         canvas.fill_rect(rect)?;
     }
+
+    {
+        let ratio = 210.0 / (*notes[1].1 - *notes[0].1);
+        let mut heap = BinaryHeap::<(Reverse<i32>, usize)>::new();
+        for (&(_, s), &(_, t)) in notes.iter().tuple_windows() {
+            let beat = (t - s) * ratio;
+            let sx = app_state.to_x(*s);
+            let tx = app_state.to_x(*t);
+            if tx < 0.0 || 2880.0 < sx {
+                continue;
+            }
+            let x = (sx + tx) as i32 / 2;
+            let text_surface = font
+                .render(&format!("{:.3}", beat))
+                .solid(Color::YELLOW)
+                .map_err(|e| e.to_string())?;
+            let (w, h) = (text_surface.width(), text_surface.height());
+            let text_texture = texture_creator
+                .create_texture_from_surface(text_surface)
+                .map_err(|e| e.to_string())?;
+            let half_w = w as i32 / 2 + 5;
+            let heap_len = heap.len();
+            let slot = match heap.peek_mut() {
+                None => 0,
+                Some(p) if p.0 .0 <= x - half_w => PeekMut::pop(p).1,
+                _ => heap_len,
+            };
+            heap.push((Reverse(x + half_w), slot));
+            let y = 250 + 30 * slot as i32;
+            let rect = Rect::new(sx as i32, y - 5, (tx - sx) as u32, 10);
+            canvas.set_draw_color(Color::GRAY);
+            canvas.draw_rect(rect)?;
+            let rect = Rect::from_center((x, y), w, h);
+            canvas.copy(&text_texture, None, rect)?;
+        }
+    }
+
     for &(_, (s, t)) in &data.determined.segments {
         let sx = app_state.to_x(s);
         let tx = app_state.to_x(t);
         let rect = Rect::new(sx as i32, 100, (tx - sx) as u32, 20);
         canvas.set_draw_color(Color::WHITE);
         canvas.draw_rect(rect)?;
+    }
+
+    {
+        let text_surface = font
+            .render(&format!("note_hit_x = {:.5}", app_state.note_hit_x()))
+            .solid(Color::WHITE)
+            .map_err(|e| e.to_string())?;
+        let (w, h) = (text_surface.width(), text_surface.height());
+        let text_texture = texture_creator
+            .create_texture_from_surface(text_surface)
+            .map_err(|e| e.to_string())?;
+        let rect = Rect::new(0, 0, w, h);
+        canvas.copy(&text_texture, None, rect)?;
     }
 
     canvas.present();
