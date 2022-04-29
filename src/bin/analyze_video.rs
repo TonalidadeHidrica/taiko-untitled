@@ -1,6 +1,7 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     io::{BufReader, BufWriter},
+    iter::repeat_with,
     path::PathBuf,
 };
 
@@ -310,6 +311,56 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         serde_json::from_reader(BufReader::new(File::open(&args.positions_path)?))?;
     let groups: GroupNotesResult =
         serde_json::from_reader(BufReader::new(File::open(&args.groups_path)?))?;
+
+    let ptss: BTreeSet<_> = groups
+        .groups
+        .iter()
+        .flat_map(|x| x.positions.iter().map(|x| x.0))
+        .collect();
+    let mut map: BTreeMap<(_, _), _> = ptss
+        .iter()
+        .copied()
+        .tuple_windows()
+        .zip(repeat_with(Vec::new))
+        .collect();
+    for group in &groups.groups {
+        for (s, t) in group.positions.iter().tuple_windows() {
+            if let Some(v) = map.get_mut(&(s.0, t.0)) {
+                v.push(s.1 - t.1);
+            }
+        }
+    }
+    let skip_frames: BTreeSet<_> = map
+        .into_iter()
+        .filter_map(|(k, v)| v.into_iter().all(|x| *x < 1e-3).then(|| k))
+        .collect();
+    let mut ratios = ptss
+        .iter()
+        .copied()
+        .tuple_windows::<(_, _)>()
+        .filter(|x| !skip_frames.contains(x))
+        .tuple_windows::<(_, _)>()
+        .zip(repeat_with(Mean::new))
+        .collect::<BTreeMap<_, _>>();
+    for group in groups.groups {
+        group
+            .positions
+            .into_iter()
+            .tuple_windows::<(_, _)>()
+            .filter_map(|((s_pts, s_note_x), (t_pts, t_note_x))| {
+                let pts = (s_pts, t_pts);
+                (!skip_frames.contains(&pts)).then(|| (pts, (t_note_x - s_note_x)))
+            })
+            .tuple_windows::<(_, _)>()
+            .for_each(|((a, x), (b, y))| {
+                if let Some(v) = ratios.get_mut(&(a, b)) {
+                    v.add(*(x / y));
+                }
+            });
+    }
+    for (k, v) in ratios {
+        println!("{:?} => {:?}", k, (!v.is_empty()).then(|| v.mean()));
+    }
 
     Ok(())
 }
