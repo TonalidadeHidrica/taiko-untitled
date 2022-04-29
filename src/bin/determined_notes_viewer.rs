@@ -235,6 +235,7 @@ fn draw(
     {
         let ratio = 210.0 / (*notes[1].1 - *notes[0].1);
         let mut heap = BinaryHeap::<(Reverse<i32>, usize)>::new();
+        let mut heap2 = BinaryHeap::<Reverse<usize>>::new();
         for (&(_, s), &(_, t)) in notes.iter().tuple_windows() {
             let beat = (t - s) * ratio;
             let sx = app_state.to_x(*s);
@@ -245,12 +246,14 @@ fn draw(
             let x = (sx + tx) as i32 / 2;
             // let half_w = w as i32 / 2 + 5;
             let half_w = 60;
-            let heap_len = heap.len();
-            let slot = match heap.peek_mut() {
-                None => 0,
-                Some(p) if p.0 .0 <= x - half_w => PeekMut::pop(p).1,
-                _ => heap_len,
-            };
+            while let Some(p) = heap.peek_mut() {
+                if p.0 .0 <= x - half_w {
+                    heap2.push(Reverse(PeekMut::pop(p).1));
+                } else {
+                    break;
+                }
+            }
+            let slot = heap2.pop().map_or(heap.len(), |x| x.0);
             heap.push((Reverse(x + half_w), slot));
             let y = 450 + 108 * slot as i32;
             let rect = Rect::new(sx as i32, y - 5, (tx - sx) as u32, 10);
