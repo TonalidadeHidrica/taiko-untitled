@@ -23,7 +23,8 @@ use sdl2::{
     video::WindowContext,
 };
 use taiko_untitled::{
-    analyze::DetermineFrameTimeResult, sdl2_utils::enable_momentum_scroll,
+    analyze::{DetermineFrameTimeResult, DeterminedNote},
+    sdl2_utils::enable_momentum_scroll,
     video_analyzer_assets::get_single_note_color,
 };
 
@@ -72,6 +73,8 @@ fn main() -> anyhow::Result<()> {
         origin_x: 0.0,
         scale_x: 0.05,
 
+        jump_combo: 0,
+
         note_hit_x: PreciseDecimal(523_08700, 5),
         speed_factor: PreciseDecimal(647_866, 3),
         speed_error_rate: PreciseDecimal(0_010_000, 6),
@@ -81,6 +84,19 @@ fn main() -> anyhow::Result<()> {
     };
 
     'main: loop {
+        let notes = data
+            .determined
+            .notes
+            .iter()
+            .map(|note| {
+                (
+                    note,
+                    NotNan::new((app_state.note_hit_x.value() - note.b) / note.a).unwrap(),
+                )
+            })
+            .sorted_by_key(|x| x.1)
+            .collect_vec();
+
         let keyboard_state = event_pump.keyboard_state();
         let shift = keyboard_state.is_scancode_pressed(Scancode::LShift)
             || keyboard_state.is_scancode_pressed(Scancode::RShift);
@@ -105,6 +121,65 @@ fn main() -> anyhow::Result<()> {
                     keycode: Some(keycode),
                     ..
                 } => match keycode {
+                    #[allow(clippy::identity_op)]
+                    Keycode::Num0 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(0))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num1 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(1))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num2 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(2))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num3 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(3))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num4 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(4))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num5 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(5))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num6 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(6))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num7 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(7))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num8 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(8))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Num9 => {
+                        app_state.jump_combo =
+                            (|| app_state.jump_combo.checked_mul(10)?.checked_add(9))()
+                                .unwrap_or(app_state.jump_combo)
+                    }
+                    Keycode::Escape => app_state.jump_combo = 0,
+                    Keycode::Return => {
+                        if (1..=notes.len()).contains(&app_state.jump_combo) {
+                            let note = &notes[app_state.jump_combo - 1];
+                            app_state.origin_x += width as f64 - app_state.to_x(*note.1);
+                        }
+                        app_state.jump_combo = 0;
+                    }
                     Keycode::K | Keycode::J => {
                         if shift {
                             app_state.cursor_num = if keycode == Keycode::K {
@@ -139,8 +214,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        draw(&mut canvas, &texture_creator, &font, &data, &app_state)
-            .map_err(|e| anyhow!("{}", e))?;
+        draw(
+            &mut canvas,
+            &texture_creator,
+            &font,
+            &data,
+            &app_state,
+            &notes,
+        )
+        .map_err(|e| anyhow!("{}", e))?;
     }
 
     Ok(())
@@ -153,6 +235,8 @@ struct AppData {
 struct AppState {
     origin_x: f64,
     scale_x: f64,
+
+    jump_combo: usize,
 
     note_hit_x: PreciseDecimal,
     speed_factor: PreciseDecimal,
@@ -193,22 +277,10 @@ fn draw(
     font: &Font,
     data: &AppData,
     app_state: &AppState,
+    notes: &[(&DeterminedNote, NotNan<f64>)],
 ) -> Result<(), String> {
     canvas.set_draw_color(Color::BLACK);
     canvas.clear();
-
-    let notes = data
-        .determined
-        .notes
-        .iter()
-        .map(|note| {
-            (
-                note,
-                NotNan::new((app_state.note_hit_x.value() - note.b) / note.a).unwrap(),
-            )
-        })
-        .sorted_by_key(|x| x.1)
-        .collect_vec();
 
     for (&(note, t), i) in notes.iter().zip(1..) {
         let x = app_state.to_x(*t);
@@ -294,6 +366,7 @@ fn draw(
 
     {
         let messages = [
+            format!("Jump to: {}", app_state.jump_combo),
             format!("note_hit_x = {:?}", app_state.note_hit_x),
             format!("speed_factor = {:?}", app_state.speed_factor),
             format!("speed_error_rate = {:?} %", app_state.speed_error_rate),
