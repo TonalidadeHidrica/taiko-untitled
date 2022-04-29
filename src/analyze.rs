@@ -147,4 +147,5 @@ pub enum SegmentListKind {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DetermineFrameTimeResult {
     pub durations: Vec<((i64, i64), f64)>,
+    pub segments: Vec<(i64, i64)>,
 }

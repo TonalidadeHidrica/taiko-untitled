@@ -410,8 +410,32 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         );
     }
 
+    let segments = {
+        let mut map = BTreeMap::<_, isize>::new();
+        for group in groups.groups.iter() {
+            let pts_start = group.positions.get(0).unwrap().0;
+            let pts_end = group.positions.last().unwrap().0;
+            *map.entry((pts_start, true)).or_default() += 1;
+            *map.entry((pts_end, false)).or_default() -= 1;
+        }
+        let mut cnt = 0;
+        let mut segments = vec![];
+        let mut start = 0;
+        for ((pts, _), delta) in map {
+            if cnt == 0 {
+                start = pts;
+            }
+            cnt += delta;
+            if cnt == 0 {
+                segments.push((start, pts));
+            }
+        }
+        segments
+    };
+
     let result = DetermineFrameTimeResult {
         durations: durations.into_iter().collect_vec(),
+        segments,
     };
     serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
 
