@@ -340,6 +340,7 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
             times
         };
         let mut estimated_durations = BTreeMap::<(i64, i64), Mean>::new();
+        let mut error_list = vec![];
         let mut errors = KahanSum::<f64>::new();
         let mut cnt = 0;
         for group in &groups.groups {
@@ -372,8 +373,10 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
             for (&(s_pts, s_x), &(t_pts, t_x)) in group.positions.iter().tuple_windows() {
                 let delta_x = t_x - s_x;
                 let duration_old = times.get(&t_pts).unwrap() - times.get(&s_pts).unwrap();
-                errors += (delta_x - duration_old * estimated_speed).powi(2);
+                let error = delta_x - duration_old * estimated_speed;
+                errors += error.powi(2);
                 cnt += 1;
+                error_list.push((NotNan::new(error.abs()).unwrap(), (s_pts, t_pts)));
 
                 let estimated_duration = delta_x / estimated_speed;
                 for (&pts_range, &segment_old) in
@@ -396,7 +399,10 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
                 .iter()
                 .map(|(&pts_range, mean)| (pts_range, mean.mean())),
         );
-        println!("error = {}", (errors.sum() / cnt as f64).sqrt());
+        // let smalls = durations.iter().filter(|x| *x.1 < 1e-3 || x.1.is_nan()).collect_vec();
+        // let preview = durations.iter().take(20).collect_vec();
+        error_list.sort_by_key(|&x| std::cmp::Reverse(x));
+        println!("avg = {:.5}\tmax = {:?}", (errors.sum() / cnt as f64).sqrt(), &error_list[0..10]);
     }
 
     Ok(())
