@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use ffmpeg4::frame;
-use itertools::Itertools;
+use itertools::{chain, Itertools};
+use maplit::btreemap;
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 
@@ -156,4 +157,61 @@ pub struct DeterminedNote {
     pub kind: SingleNoteKind,
     pub a: f64,
     pub b: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VideoIntegralResult {
+    pub results: BTreeMap<i64, IntegralResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IntegralResult {
+    pub top_left: u64,
+    pub bottom: usize,
+}
+
+pub fn integrate_some_fraction(frame: &frame::Video) -> IntegralResult {
+    let s = frame.stride(0);
+    let data = &frame.data(0);
+
+    #[allow(clippy::erasing_op)]
+    let top_left = data[0 * s..][192..252].iter().map(|&x| x as u64).sum();
+    let bottom = match () {
+        _ if data[960 + s * 743] > 216 => 1,
+        _ if data[1028 + s * 647] > 216 => 2,
+        _ if data[916 + s * 800] > 216 => 3,
+        _ if data[482 + s * 743] > 216 => 4,
+        _ if data[484 + s * 866] > 216 => 5,
+        _ if data[988 + s * 814] > 216 => 6,
+        _ if data[1437 + s * 745] > 216 => 7,
+        _ if data[1449 + s * 854] > 216 => 8,
+        _ => 0,
+    };
+
+    IntegralResult { top_left, bottom }
+}
+
+pub fn map_float(x: f64, sx: f64, tx: f64, sy: f64, ty: f64) -> f64 {
+    sy + (x - sx) / (tx - sx) * (ty - sy)
+}
+
+pub fn make_cumulative_map<'a, I>(durations: I) -> BTreeMap<i64, f64>
+where
+    I: IntoIterator<Item = (&'a (i64, i64), &'a f64)>,
+{
+    let mut durations = durations.into_iter();
+    let next = match durations.next() {
+        Some(next) => next,
+        None => return BTreeMap::new(),
+    };
+    let mut pts = next.0 .0;
+    let mut time = 0.0;
+    let mut times = btreemap![pts => time];
+    for (&(s_pts, t_pts), &duration) in chain([next], durations) {
+        assert_eq!(pts, s_pts);
+        pts = t_pts;
+        time += duration;
+        times.insert(pts, time);
+    }
+    times
 }

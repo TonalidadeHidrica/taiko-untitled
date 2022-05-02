@@ -1,6 +1,6 @@
 use std::{
     cmp::Reverse,
-    collections::{binary_heap::PeekMut, BinaryHeap},
+    collections::{binary_heap::PeekMut, BTreeMap, BinaryHeap},
     fmt::Debug,
     path::PathBuf,
 };
@@ -23,7 +23,10 @@ use sdl2::{
     video::WindowContext,
 };
 use taiko_untitled::{
-    analyze::{DetermineFrameTimeResult, DeterminedNote},
+    analyze::{
+        make_cumulative_map, map_float, DetermineFrameTimeResult, DeterminedNote,
+        VideoIntegralResult,
+    },
     sdl2_utils::enable_momentum_scroll,
     video_analyzer_assets::get_single_note_color,
 };
@@ -31,6 +34,8 @@ use taiko_untitled::{
 #[derive(Parser)]
 struct Opts {
     determined_path: PathBuf,
+    #[clap(long = "integrals")]
+    integrals_path: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -40,8 +45,17 @@ fn main() -> anyhow::Result<()> {
 
     enable_momentum_scroll();
 
+    let determined: DetermineFrameTimeResult =
+        serde_json::from_reader(File::open(&opts.determined_path)?)?;
+    let pts_to_time = make_cumulative_map(determined.durations.iter().map(|(x, y)| (x, y)));
     let data = AppData {
-        determined: serde_json::from_reader(File::open(&opts.determined_path)?)?,
+        determined,
+        pts_to_time,
+        integrals: opts
+            .integrals_path
+            .as_ref()
+            .map(|p| anyhow::Ok(serde_json::from_reader(File::open(p)?)?))
+            .transpose()?,
     };
 
     let width = 1440;
@@ -81,6 +95,9 @@ fn main() -> anyhow::Result<()> {
         duration_error_rate: PreciseDecimal(0_100_000, 6),
         cursor_digit: 4,
         cursor_num: 0,
+
+        mouse_x: 0.0,
+        drag_start_x: None,
     };
 
     'main: loop {
@@ -117,6 +134,11 @@ fn main() -> anyhow::Result<()> {
                         app_state.origin_x -= x * 10.0;
                     }
                 }
+                Event::MouseMotion { x, .. } => app_state.mouse_x = x as f64 * dpi_factor,
+                Event::MouseButtonDown { x, .. } => {
+                    app_state.drag_start_x = Some(x as f64 * dpi_factor)
+                }
+                Event::MouseButtonUp { .. } => app_state.drag_start_x = None,
                 Event::KeyDown {
                     keycode: Some(keycode),
                     ..
@@ -230,6 +252,8 @@ fn main() -> anyhow::Result<()> {
 
 struct AppData {
     determined: DetermineFrameTimeResult,
+    integrals: Option<VideoIntegralResult>,
+    pts_to_time: BTreeMap<i64, f64>,
 }
 
 struct AppState {
@@ -244,6 +268,9 @@ struct AppState {
     duration_error_rate: PreciseDecimal,
     cursor_digit: i32,
     cursor_num: usize,
+
+    mouse_x: f64,
+    drag_start_x: Option<f64>,
 }
 impl AppState {
     fn to_x(&self, time: f64) -> f64 {
@@ -319,10 +346,20 @@ fn draw(
         let ratio = 210.0 / (*notes[1].1 - *notes[0].1);
         let mut heap = BinaryHeap::<(Reverse<i32>, usize)>::new();
         let mut heap2 = BinaryHeap::<Reverse<usize>>::new();
-        for (&(_, s), &(_, t)) in notes.iter().tuple_windows() {
-            let beat = (t - s) * ratio;
-            let sx = app_state.to_x(*s);
-            let tx = app_state.to_x(*t);
+        let notes = notes.iter().tuple_windows().map(|(s, t)| {
+            (
+                app_state.to_x(*s.1),
+                app_state.to_x(*t.1),
+                *(t.1 - s.1) * ratio,
+            )
+        });
+        let drag = app_state.drag_start_x.map(|sx| {
+            let tx = app_state.mouse_x;
+            let (sx, tx) = (sx.min(tx), sx.max(tx));
+            let duration = app_state.x_to_time(tx) - app_state.x_to_time(sx);
+            (sx, tx, duration * ratio)
+        });
+        for (sx, tx, beat) in notes.merge(drag) {
             if tx < 0.0 || 2880.0 < sx {
                 continue;
             }
@@ -347,7 +384,7 @@ fn draw(
                 canvas,
                 texture_creator,
                 font,
-                *beat,
+                beat,
                 app_state.duration_error_rate,
                 (x, y),
                 Color::YELLOW,
@@ -391,6 +428,51 @@ fn draw(
         }
     }
 
+    canvas.set_clip_rect(Rect::new(0, 0, 2880, 90));
+    for ((sx, sy, res), (tx, ty, _)) in data
+        .integrals
+        .iter()
+        .flat_map(|x| &x.results)
+        .map(|(&pts, res)| {
+            (
+                app_state.to_x(linop_map(&data.pts_to_time, pts)) as i32,
+                map_float(res.top_left as _, 900.0, 5000.0, 30.0, 90.0) as i32,
+                res,
+            )
+        })
+        .tuple_windows()
+    {
+        if tx < -100 || 3180 < sx {
+            continue;
+        }
+        canvas.set_draw_color(Color::GREEN);
+        canvas.draw_line((sx, sy), (tx, ty))?;
+        if let Some(color) = match res.bottom {
+            1 => Some(Color::RGB(255, 0, 0)),
+            2 => Some(Color::RGB(255, 128, 0)),
+            3 => Some(Color::RGB(0, 128, 0)),
+            4 => Some(Color::RGB(128, 255, 128)),
+            5 => Some(Color::RGB(0, 255, 0)),
+            6 => Some(Color::RGB(0, 0, 128)),
+            7 => Some(Color::RGB(128, 128, 255)),
+            8 => Some(Color::RGB(0, 0, 255)),
+            _ => None,
+        } {
+            let rect = Rect::new(sx, 10, (tx - sx) as _, 10);
+            canvas.set_draw_color(color);
+            canvas.fill_rect(rect)?;
+            canvas.set_draw_color(Color::WHITE);
+            canvas.draw_rect(rect)?;
+        }
+    }
+    canvas.set_clip_rect(None);
+
+    canvas.set_draw_color(Color::WHITE);
+    canvas.draw_line(
+        (app_state.mouse_x as i32, 0),
+        (app_state.mouse_x as i32, 1620),
+    )?;
+
     canvas.present();
     Ok(())
 }
@@ -425,4 +507,17 @@ fn draw_range_text(
         canvas.copy(&text_texture, None, rect)?;
     }
     Ok(())
+}
+
+fn linop_map(map: &BTreeMap<i64, f64>, pts: i64) -> f64 {
+    assert!(map.len() >= 2);
+    let mut nexts = map.range(pts..);
+    let mut prevs = map.range(..pts).rev();
+    let ((&sx, &sy), (&tx, &ty)) = match (prevs.next(), nexts.next()) {
+        (Some(s), Some(t)) => (s, t),
+        (None, Some(s)) => (s, nexts.next().unwrap()),
+        (Some(t), None) => (prevs.next().unwrap(), t),
+        (None, None) => unreachable!("map.len() >= 1"),
+    };
+    map_float(pts as _, sx as _, tx as _, sy as _, ty as _)
 }

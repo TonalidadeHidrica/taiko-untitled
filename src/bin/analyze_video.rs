@@ -13,13 +13,13 @@ use fs_err::File;
 use itertools::{zip, Itertools};
 use kahan::KahanSum;
 use linreg::linear_regression_of;
-use maplit::btreemap;
 use num::Integer;
 use ordered_float::NotNan;
 use taiko_untitled::{
     analyze::{
-        detect_note_positions, DetermineFrameTimeResult, DeterminedNote, GroupNotesResult,
-        GroupedNote, NotePositionsResult, SegmentList, SegmentListKind,
+        detect_note_positions, integrate_some_fraction, make_cumulative_map, map_float,
+        DetermineFrameTimeResult, DeterminedNote, GroupNotesResult, GroupedNote,
+        NotePositionsResult, SegmentList, SegmentListKind, VideoIntegralResult,
     },
     ffmpeg_utils::{next_frame, FilteredPacketIter},
 };
@@ -36,6 +36,7 @@ enum Sub {
     GroupNotes(GroupNotes),
     FixGroup(FixGroup),
     DetermineFrameTime(DetermineFrameTime),
+    VideoIntegral(VideoIntegral),
 }
 
 #[derive(Args)]
@@ -66,6 +67,12 @@ struct DetermineFrameTime {
     repetition: usize,
 }
 
+#[derive(Args)]
+struct VideoIntegral {
+    video_path: PathBuf,
+    output_path: PathBuf,
+}
+
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     match &opts.sub {
@@ -73,6 +80,7 @@ fn main() -> anyhow::Result<()> {
         Sub::GroupNotes(args) => group_notes(args),
         Sub::FixGroup(args) => fix_group(args),
         Sub::DetermineFrameTime(args) => determine_frame_time(args),
+        Sub::VideoIntegral(args) => video_integral(args),
     }
 }
 
@@ -210,10 +218,6 @@ fn group_notes(args: &GroupNotes) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn map_float(x: f64, sx: f64, tx: f64, sy: f64, ty: f64) -> f64 {
-    sy + (x - sx) / (tx - sx) * (ty - sy)
-}
-
 fn fix_group(args: &FixGroup) -> anyhow::Result<()> {
     let groups: GroupNotesResult =
         serde_json::from_reader(BufReader::new(File::open(&args.groups_path)?))?;
@@ -329,7 +333,7 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         .collect();
     // let mut speeds: BTreeMap<usize, f64>;
     for repetition in 0..args.repetition {
-        let times = make_cumulative_map(&ptss, &durations);
+        let times = make_cumulative_map(&durations);
         let mut estimated_durations = BTreeMap::<(i64, i64), Mean>::new();
         let mut error_list = vec![];
         let mut errors = KahanSum::<f64>::new();
@@ -400,7 +404,7 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
         );
     }
 
-    let times = make_cumulative_map(&ptss, &durations);
+    let times = make_cumulative_map(&durations);
     let mut notes = vec![];
     for group in &groups.groups {
         let xys = group
@@ -451,18 +455,27 @@ fn determine_frame_time(args: &DetermineFrameTime) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn make_cumulative_map(
-    ptss: &BTreeSet<i64>,
-    durations: &BTreeMap<(i64, i64), f64>,
-) -> BTreeMap<i64, f64> {
-    let mut pts = *ptss.iter().next().unwrap();
-    let mut time = 0.0;
-    let mut times = btreemap![pts => time];
-    for (&(s_pts, t_pts), &duration) in durations {
-        assert_eq!(pts, s_pts);
-        pts = t_pts;
-        time += duration;
-        times.insert(pts, time);
+fn video_integral(args: &VideoIntegral) -> anyhow::Result<()> {
+    let mut input_context = format::input(&args.video_path)?;
+    let stream = input_context
+        .streams()
+        .best(media::Type::Video)
+        .context("No video stream found")?;
+    let stream_index = stream.index();
+    let mut decoder = stream.codec().decoder().video()?;
+    decoder.set_parameters(stream.parameters())?;
+    let mut packet_iterator = FilteredPacketIter(input_context.packets(), stream_index);
+    let mut frame = frame::Video::empty();
+
+    let mut result = VideoIntegralResult {
+        results: BTreeMap::new(),
+    };
+    while next_frame(&mut packet_iterator, &mut decoder, &mut frame)? {
+        let pts = frame.pts().unwrap();
+        result.results.insert(pts, integrate_some_fraction(&frame));
     }
-    times
+
+    serde_json::to_writer(BufWriter::new(File::create(&args.output_path)?), &result)?;
+
+    Ok(())
 }

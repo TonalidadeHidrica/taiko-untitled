@@ -20,7 +20,7 @@ use std::fmt::Debug;
 use std::iter::repeat_with;
 use std::path::PathBuf;
 use std::time::Instant;
-use taiko_untitled::analyze::{detect_note_positions, DetectedNote};
+use taiko_untitled::analyze::{detect_note_positions, integrate_some_fraction, DetectedNote};
 use taiko_untitled::assets::Assets;
 use taiko_untitled::ffmpeg_utils::{get_sdl_pix_fmt_and_blendmode, next_frame, FilteredPacketIter};
 use taiko_untitled::game::draw_game_notes;
@@ -482,6 +482,8 @@ fn main() -> Result<(), MainErr> {
         }
         canvas.set_clip_rect(None);
 
+        let integrations = (frame.planes() > 0).then(|| integrate_some_fraction(&frame));
+
         let infos = [
             format!("({}, {})", focus_x, focus_y),
             {
@@ -496,12 +498,8 @@ fn main() -> Result<(), MainErr> {
             format!("delta configurated = {:.4?}", score_time_deltas.get(pts)),
             format!("delta overwritten = {:.4?}", score_time_delta),
             format!("note_x = {}", note_x),
-            // format!("YUV = {:?}",
-            //     current_frame.and_then(|frame|
-            //         (0..3).map(|i|
-            //             current_frame.data(i)[focus_x + focus_y * (width as i32)]
-            //         ).collect_vec()
-            // ),
+            format!("top = {}", integrations.as_ref().map_or(0, |x| x.top_left)),
+            format!("bottom = {}", integrations.as_ref().map_or(0, |x| x.bottom)),
         ];
         let mut current_top = 0;
         for info in &infos {
@@ -794,7 +792,7 @@ fn detect_notes(
         return Ok(vec![]);
     }
 
-    let y = 600;
+    let y = if focus_y < 540 { 600 } else { 60 };
     canvas.set_draw_color(Color::BLACK);
     canvas.fill_rect(Rect::new(0, y, 1920, 256))?;
     canvas.set_draw_color(Color::WHITE);
