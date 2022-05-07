@@ -1,4 +1,4 @@
-use crate::audio::{AudioManager, SoundBuffer};
+use crate::audio::{AudioManager, SoundBuffer, SoundEffectKey};
 use crate::errors::{new_sdl_error, TaikoError, TaikoErrorCause};
 use crate::game::AutoEvent;
 use sdl2::image::LoadTexture;
@@ -46,7 +46,7 @@ pub struct Chunks {
 impl<'a> Assets<'a> {
     pub fn new<'b>(
         texture_creator: &'a TextureCreator<WindowContext>,
-        audio_manager: &'b AudioManager<AutoEvent>, // TODO should be stream_config instead
+        audio_manager: &'b AudioManager<SoundEffectKey, AutoEvent>, // TODO should be stream_config instead
     ) -> Result<Assets<'a>, TaikoError> {
         let assets_dir = Path::new("assets");
 

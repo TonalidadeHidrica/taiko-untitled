@@ -1,9 +1,9 @@
 use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
+use enum_map::{Enum, EnumArray, EnumMap};
 use fs_err::File;
 use itertools::Itertools;
-use retain_mut::RetainMut;
 use rodio::source::UniformSourceIterator;
 use rodio::{Decoder, Source};
 use std::collections::VecDeque;
@@ -15,9 +15,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 use universal_audio_decoder::{new_uniform_source_iterator, TrueUniformSourceIterator};
 
-pub struct AudioManager<T> {
+pub struct AudioManager<SEK, T>
+where
+    SEK: EnumArray<Option<SoundBufferSource>>,
+{
     pub stream_config: StreamConfig,
-    sender_to_audio: Sender<MessageToAudio<T>>,
+    sender_to_audio: Sender<MessageToAudio<SEK, T>>,
     drop_sender: Sender<()>,
     pub sound_effect_receiver: Receiver<T>,
     playback_position: Arc<Mutex<PlaybackPosition>>,
@@ -38,24 +41,31 @@ enum PlaybackPosition {
     },
 }
 
-enum MessageToAudio<T> {
+enum MessageToAudio<SEK, T>
+where
+    SEK: EnumArray<Option<SoundBufferSource>>,
+{
     Play,
     Pause,
     Seek(f64),
     LoadMusic(PathBuf),
-    AddPlay(SoundBufferSource),
+    AddPlay(SEK, SoundBufferSource),
 
     SetMusicVolume(f32),
     SetPlaySpeed(f64),
 
-    AddSchedules(Vec<SoundEffectSchedule<T>>),
+    AddSchedules(Vec<SoundEffectSchedule<SEK, T>>),
     SortSchedules,
     CleanSchedules,
     SwitchScheduled(bool),
 }
 
-impl<T: Send + 'static> AudioManager<T> {
-    pub fn new() -> Result<AudioManager<T>, TaikoError> {
+impl<T: Send + 'static, SEK> AudioManager<SEK, T>
+where
+    SEK: EnumArray<Option<SoundBufferSource>> + Send + 'static,
+    SEK::Array: Send,
+{
+    pub fn new() -> Result<AudioManager<SEK, T>, TaikoError> {
         let (sender_to_audio, receiver_to_audio) = mpsc::channel();
         let (stream_config_sender, stream_config_receiver) = mpsc::channel();
         let (drop_sender, drop_receiver) = mpsc::channel();
@@ -178,9 +188,9 @@ impl<T: Send + 'static> AudioManager<T> {
             })
     }
 
-    pub fn add_play(&self, buffer: &SoundBuffer) -> Result<(), TaikoError> {
+    pub fn add_play(&self, key: SEK, buffer: &SoundBuffer) -> Result<(), TaikoError> {
         self.sender_to_audio
-            .send(MessageToAudio::AddPlay(buffer.new_source()))
+            .send(MessageToAudio::AddPlay(key, buffer.new_source()))
             .map_err(|_| TaikoError {
                 message: "Failed to play a chunk; the audio stream has been stopped".to_string(),
                 cause: TaikoErrorCause::None,
@@ -189,7 +199,7 @@ impl<T: Send + 'static> AudioManager<T> {
 
     pub fn add_play_schedules(
         &self,
-        schedules: Vec<SoundEffectSchedule<T>>,
+        schedules: Vec<SoundEffectSchedule<SEK, T>>,
     ) -> Result<(), TaikoError> {
         self.sender_to_audio
             .send(MessageToAudio::AddSchedules(schedules))
@@ -256,11 +266,15 @@ impl<T: Send + 'static> AudioManager<T> {
     }
 }
 
-fn stream_thread<T: Send + 'static>(
-    receiver_to_audio: Receiver<MessageToAudio<T>>,
+fn stream_thread<T: Send + 'static, SEK>(
+    receiver_to_audio: Receiver<MessageToAudio<SEK, T>>,
     sound_effect_sender: Sender<T>,
     playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
-) -> Result<(StreamConfig, Stream), TaikoError> {
+) -> Result<(StreamConfig, Stream), TaikoError>
+where
+    SEK: EnumArray<Option<SoundBufferSource>> + Send + 'static,
+    SEK::Array: Send,
+{
     let host = cpal::default_host();
     if let Ok(devices) = host.devices() {
         for device in devices {
@@ -324,7 +338,10 @@ fn stream_thread<T: Send + 'static>(
     Ok((stream_config, stream))
 }
 
-impl<T> Drop for AudioManager<T> {
+impl<SEK, T> Drop for AudioManager<SEK, T>
+where
+    SEK: EnumArray<Option<SoundBufferSource>>,
+{
     fn drop(&mut self) {
         if self.drop_sender.send(()).is_err() {
             eprintln!("Failed to send drop signal to audio stream thread");
@@ -334,16 +351,19 @@ impl<T> Drop for AudioManager<T> {
 
 type MusicSource = TrueUniformSourceIterator<Decoder<BufReader<File>>>;
 
-struct AudioThreadState<T> {
+struct AudioThreadState<SEK, T>
+where
+    SEK: EnumArray<Option<SoundBufferSource>>,
+{
     stream_config: StreamConfig,
 
     music: Option<MusicSource>,
-    sound_effects: Vec<SoundBufferSource>,
+    sound_effects: EnumMap<SEK, Option<SoundBufferSource>>,
 
-    sound_effect_schedules: VecDeque<SoundEffectSchedule<T>>,
+    sound_effect_schedules: VecDeque<SoundEffectSchedule<SEK, T>>,
     scheduled_play_enabled: bool,
 
-    receiver_to_audio: Receiver<MessageToAudio<T>>,
+    receiver_to_audio: Receiver<MessageToAudio<SEK, T>>,
     sound_effect_sender: Sender<T>,
     playing: bool,
     played_sample_count: usize,
@@ -353,24 +373,28 @@ struct AudioThreadState<T> {
     play_speed: f64,
 }
 
-pub struct SoundEffectSchedule<T> {
+pub struct SoundEffectSchedule<SEK, T> {
     pub timestamp: f64,
     pub source: SoundBufferSource,
     pub volume: f64,
+    pub sound_effect_key: SEK,
     pub response: T,
 }
 
-impl<T> AudioThreadState<T> {
+impl<SEK, T> AudioThreadState<SEK, T>
+where
+    SEK: EnumArray<Option<SoundBufferSource>>,
+{
     pub fn new(
         stream_config: StreamConfig,
-        receiver_to_audio: mpsc::Receiver<MessageToAudio<T>>,
+        receiver_to_audio: mpsc::Receiver<MessageToAudio<SEK, T>>,
         sound_effect_sender: Sender<T>,
         playback_position_ptr: Weak<Mutex<PlaybackPosition>>,
     ) -> Self {
         AudioThreadState {
             stream_config,
             music: None,
-            sound_effects: Vec::new(),
+            sound_effects: EnumMap::default(),
 
             sound_effect_schedules: VecDeque::new(),
             scheduled_play_enabled: false,
@@ -440,8 +464,8 @@ impl<T> AudioThreadState<T> {
                             );
                         };
                     }
-                    MessageToAudio::AddPlay(source) => {
-                        self.sound_effects.push(source);
+                    MessageToAudio::AddPlay(key, source) => {
+                        self.sound_effects[key] = Some(source);
                     }
                     MessageToAudio::CleanSchedules => {
                         self.sound_effect_schedules.clear();
@@ -506,7 +530,7 @@ impl<T> AudioThreadState<T> {
                         * (next.timestamp - music_position_start)
                         * self.stream_config.sample_rate.0 as f64
                         * self.play_speed) as usize;
-                    self.sound_effects.push(source);
+                    self.sound_effects[next.sound_effect_key] = Some(source);
                     self.sound_effect_sender
                         .send(next.response)
                         .map_err(|e| format!("The main thread has been panicked: {}", e))
@@ -533,13 +557,14 @@ impl<T> AudioThreadState<T> {
                 .unwrap_or(0.0)
                 .clamp(-4.0, 4.0); // Prevent too large sound
 
-                self.sound_effects.retain_mut(|source| match source.next() {
-                    Some(value) => {
-                        next += value;
-                        true
+                for sound_effect in self.sound_effects.values_mut() {
+                    if let Some(source) = sound_effect {
+                        match source.next() {
+                            Some(value) => next += value,
+                            None => *sound_effect = None,
+                        }
                     }
-                    None => false,
-                });
+                }
                 *out = S::from(&next);
             }
         }
@@ -668,4 +693,10 @@ impl Source for SoundBufferSource {
                 / (1.0 / self.sample_rate() as f64),
         ))
     }
+}
+
+#[derive(Clone, Copy, Debug, Enum)]
+pub enum SoundEffectKey {
+    Don,
+    Ka,
 }

@@ -13,6 +13,7 @@ use sdl2::EventPump;
 
 use crate::assets::Assets;
 use crate::audio::AudioManager;
+use crate::audio::SoundEffectKey;
 use crate::config::TaikoConfig;
 use crate::errors::no_score_in_tja;
 use crate::errors::to_sdl_error;
@@ -73,7 +74,7 @@ pub fn pause(
     config: &TaikoConfig,
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
-    audio_manager: &AudioManager<AutoEvent>,
+    audio_manager: &AudioManager<SoundEffectKey, AutoEvent>,
     assets: &mut Assets,
     file_change_receiver: &Receiver<notify::DebouncedEvent>,
     songs: &[Song],

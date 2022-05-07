@@ -1,6 +1,6 @@
 use crate::assets::Assets;
-use crate::audio::SoundBuffer;
 use crate::audio::{AudioManager, SoundEffectSchedule};
+use crate::audio::{SoundBuffer, SoundEffectKey};
 use crate::config::TaikoConfig;
 use crate::errors::no_score_in_tja;
 use crate::errors::{new_sdl_error, new_tja_error, to_sdl_error, TaikoError};
@@ -58,7 +58,7 @@ pub fn game<P>(
     event_subsystem: &EventSubsystem,
     event_pump: &mut EventPump,
     timer_subsystem: &mut TimerSubsystem,
-    audio_manager: &AudioManager<AutoEvent>,
+    audio_manager: &AudioManager<SoundEffectKey, AutoEvent>,
     assets: &mut Assets,
     tja_file_names: &[P],
 ) -> Result<GameMode, TaikoError>
@@ -179,7 +179,7 @@ fn play(
     event_subsystem: &EventSubsystem,
     event_pump: &mut EventPump,
     timer_subsystem: &mut TimerSubsystem,
-    audio_manager: &AudioManager<AutoEvent>,
+    audio_manager: &AudioManager<SoundEffectKey, AutoEvent>,
     assets: &mut Assets,
     scores: &[&Score],
     game_user_state: &mut GameUserState,
@@ -242,7 +242,7 @@ fn game_loop(
     canvas: &mut WindowCanvas,
     event_pump: &mut EventPump,
     timer_subsystem: &mut TimerSubsystem,
-    audio_manager: &AudioManager<AutoEvent>,
+    audio_manager: &AudioManager<SoundEffectKey, AutoEvent>,
     assets: &mut Assets,
     scores: &[&Score],
     game_managers: &mut [GameManager],
@@ -423,7 +423,7 @@ fn draw_game_to_canvas(
 struct SoundEffectCallback<'a> {
     sound_don: SoundBuffer,
     sound_ka: SoundBuffer,
-    audio_manager: &'a AudioManager<AutoEvent>,
+    audio_manager: &'a AudioManager<SoundEffectKey, AutoEvent>,
 }
 impl<'a> EventWatchCallback for SoundEffectCallback<'a> {
     fn callback(&mut self, event: Event) {
@@ -436,11 +436,15 @@ impl<'a> EventWatchCallback for SoundEffectCallback<'a> {
             match keycode {
                 Keycode::X | Keycode::Slash => {
                     // TODO send error to main thread
-                    let _ = self.audio_manager.add_play(&self.sound_don);
+                    let _ = self
+                        .audio_manager
+                        .add_play(SoundEffectKey::Don, &self.sound_don);
                 }
                 Keycode::A | Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
                     // TODO send error to main thread
-                    let _ = self.audio_manager.add_play(&self.sound_ka);
+                    let _ = self
+                        .audio_manager
+                        .add_play(SoundEffectKey::Ka, &self.sound_ka);
                 }
                 _ => {}
             }
@@ -450,7 +454,7 @@ impl<'a> EventWatchCallback for SoundEffectCallback<'a> {
 
 fn setup_sound_effect<'e, 'au, 'at>(
     event_subsystem: &'e EventSubsystem,
-    audio_manager: &'au AudioManager<AutoEvent>,
+    audio_manager: &'au AudioManager<SoundEffectKey, AutoEvent>,
     assets: &'at Assets,
 ) -> EventWatch<'au, SoundEffectCallback<'au>> {
     let sound_don = assets.chunks.sound_don.clone();
@@ -608,7 +612,7 @@ fn generate_audio_schedules(
     index: usize,
     score: &ScoreOfGameState,
     auto_sent_pointer: &mut usize,
-) -> Vec<SoundEffectSchedule<AutoEvent>> {
+) -> Vec<SoundEffectSchedule<SoundEffectKey, AutoEvent>> {
     let mut schedules = Vec::new();
     let mut current_branch = BranchType::Normal;
     let mut branches = score.branches.iter().peekable();
@@ -629,9 +633,9 @@ fn generate_audio_schedules(
         }
         match &note.content {
             NoteContent::Single(single_note) => {
-                let chunk = match single_note.kind.color {
-                    NoteColor::Don => &assets.chunks.sound_don,
-                    NoteColor::Ka => &assets.chunks.sound_ka,
+                let (key, chunk) = match single_note.kind.color {
+                    NoteColor::Don => (SoundEffectKey::Don, &assets.chunks.sound_don),
+                    NoteColor::Ka => (SoundEffectKey::Ka, &assets.chunks.sound_ka),
                 };
                 let volume = match single_note.kind.size {
                     NoteSize::Small => 1.0,
@@ -646,6 +650,7 @@ fn generate_audio_schedules(
                         time: note.time,
                         kind: single_note.kind,
                     },
+                    sound_effect_key: key,
                 });
             }
             NoteContent::Renda(RendaContent { end_time, .. }) => {
@@ -655,6 +660,7 @@ fn generate_audio_schedules(
                         .map(|t| SoundEffectSchedule {
                             timestamp: t,
                             source: assets.chunks.sound_don.new_source(),
+                            sound_effect_key: SoundEffectKey::Don,
                             volume: 1.0,
                             response: AutoEvent {
                                 index,
