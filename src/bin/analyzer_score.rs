@@ -42,9 +42,12 @@ fn main() -> anyhow::Result<()> {
     let last_beat = notes_map.range(..).last().unwrap().0.ceil();
     let mut current_scroll = 1.0;
     let mut line_first = true;
-    for i in range_step_inclusive(BigRational::zero(), last_beat, BigRational::one()) {
+    let four = BigRational::from_integer(BigInt::from(4));
+    let beat_step = BigRational::one() / BigRational::from_integer(BigInt::from(1));
+    println!("#MEASURE {}", &beat_step / &four);
+    for i in range_step_inclusive(BigRational::zero(), last_beat, beat_step.clone()) {
         let notes = notes_map
-            .range(i.clone()..i.clone() + BigRational::one())
+            .range(i.clone()..i.clone() + &beat_step)
             .map(|v| (v.0 - i.clone(), v.1))
             .collect_vec();
         let lcm = notes
@@ -52,6 +55,9 @@ fn main() -> anyhow::Result<()> {
             .map(|v| v.0.denom())
             .fold(BigInt::one(), |x, y| x.lcm(y));
         let mut slots = vec![None; lcm.clone().to_usize().unwrap()];
+        // if slots.len() >= 640 {  // Does it really work?
+        //     bail!("Too long measure: {}, {:?}", slots.len(), notes.iter().map(|x| x.0.to_string()).collect_vec());
+        // }
         for (beat, notes) in notes {
             let index = (beat * lcm.clone()).to_usize().unwrap();
             let note = notes.iter().min_by_key(|n| n.scroll).unwrap();
@@ -94,6 +100,9 @@ fn main() -> anyhow::Result<()> {
         print!(",");
         line_first = false;
     }
+    if !line_first {
+        println!();
+    }
     println!("#END");
 
     Ok(())
@@ -121,6 +130,7 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<(Bpm, Vec<NoteS
     let mut beat = BigRational::zero();
     let mut notes = vec![];
     let mut hs = 1.0;
+    let path = path.as_ref();
 
     let (mut bpm, score) = parse_score(&path)?;
     for (_measure_index, elements) in (1..).zip(score.iter()) {
@@ -174,8 +184,14 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<(Bpm, Vec<NoteS
                     if let Some((color, size)) = kind {
                         {
                             let d = u64::try_from(beat.denom()).context("Too large denominator")?;
-                            // divisor of 48 or 64
-                            if 48 % d > 0 && 64 % d > 0 {
+                            let ends_with =
+                                |s: &str| path.file_name().unwrap().to_str().unwrap().ends_with(s);
+                            let exception = ends_with("BPM187.5.tja")
+                                && (i == 18 || i == 53 || i == 95)
+                                && (note_count == 19)
+                                || ends_with("BPM218.75.tja") && (i == 18) && (note_count == 44);
+                            // divisor of 48 or 64 => well, we need 192 or 128... and 144 ?!
+                            if !(192 % d == 0 || 128 % d == 0 || 144 % d == 0 || exception) {
                                 bail!(
                                     "File {:?} Line {}: {}/{} => {} {:?}",
                                     path,
