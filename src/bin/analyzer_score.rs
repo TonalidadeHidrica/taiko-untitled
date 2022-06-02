@@ -189,7 +189,10 @@ fn load_score<P: AsRef<Path> + Debug>(path: P) -> anyhow::Result<(Bpm, Vec<NoteS
                             let exception = ends_with("BPM187.5.tja")
                                 && (i == 18 || i == 53 || i == 95)
                                 && (note_count == 19)
-                                || ends_with("BPM218.75.tja") && (i == 18) && (note_count == 44);
+                                || ends_with("BPM218.75.tja")
+                                    && ((i == 18) && (note_count == 44)
+                                        || ((50..=56).contains(&i) || (92..=98).contains(&i))
+                                            && (note_count == 44 * 7));
                             // divisor of 48 or 64 => well, we need 192 or 128... and 144 ?!
                             if !(192 % d == 0 || 128 % d == 0 || 144 % d == 0 || exception) {
                                 bail!(
