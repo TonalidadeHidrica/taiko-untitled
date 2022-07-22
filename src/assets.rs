@@ -167,7 +167,7 @@ fn load_texture_and_check_size<P: AsRef<Path> + Debug>(
 ) -> Result<Texture, TaikoError> {
     let texture = texture_creator
         .load_texture(&path)
-        .map_err(|s| new_sdl_error("Failed to load background texture", s))?;
+        .map_err(|s| new_sdl_error(format!("Failed to load texture {:?}", path), s))?;
     let TextureQuery { width, height, .. } = texture.query();
     if (width, height) == required_dimensions {
         Ok(texture)
