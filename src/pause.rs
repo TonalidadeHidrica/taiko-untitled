@@ -50,7 +50,7 @@ impl<'a> PausedScore<'a> {
             .iter()
             .tuple_windows()
             .flat_map(|(a, b)| {
-                iterate(a.time, move |x| x + a.scroll_speed.beat_duration())
+                iterate(a.time, move |x| x + a.scroll_speed.beat_duration() / 8.)
                     .take_while(move |&x| x < b.time - 1e-3)
             })
             .map(Into::into)
