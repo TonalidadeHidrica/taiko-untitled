@@ -2,7 +2,6 @@ use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
 use itertools::Itertools;
-use retain_mut::RetainMut;
 use rodio::source::UniformSourceIterator;
 use rodio::{Decoder, Source};
 use std::collections::VecDeque;
