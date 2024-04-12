@@ -236,8 +236,7 @@ fn game_loop(
                 | Keycode::A
                 | Keycode::S
                 | Keycode::Colon
-                | Keycode::RightBracket
-                => {
+                | Keycode::RightBracket => {
                     if !*auto {
                         process_key_event(
                             keycode,
@@ -366,7 +365,11 @@ impl<'a> EventWatchCallback for SoundEffectCallback<'a> {
                     // TODO send error to main thread
                     let _ = self.audio_manager.add_play(&self.sound_don);
                 }
-                Keycode::A | Keycode::Z | Keycode::Underscore | Keycode::Backslash => {
+                Keycode::A
+                | Keycode::Z
+                | Keycode::Underscore
+                | Keycode::Backslash
+                | Keycode::RightBracket => {
                     // TODO send error to main thread
                     let _ = self.audio_manager.add_play(&self.sound_ka);
                 }
@@ -514,7 +517,11 @@ fn process_key_event(
 ) {
     let color = match keycode {
         Keycode::X | Keycode::Slash | Keycode::S | Keycode::Colon => NoteColor::Don,
-        Keycode::Z | Keycode::Underscore | Keycode::Backslash | Keycode::A | Keycode::RightBracket => NoteColor::Ka,
+        Keycode::Z
+        | Keycode::Underscore
+        | Keycode::Backslash
+        | Keycode::A
+        | Keycode::RightBracket => NoteColor::Ka,
         _ => unreachable!(),
     };
     if let Some(music_position) = music_position {
