@@ -39,9 +39,9 @@ impl Default for TaikoConfig {
 }
 
 pub fn get_config() -> Result<TaikoConfig, ConfigError> {
-    let mut config = Config::new();
-    config.merge(Config::try_from(&TaikoConfig::default())?)?;
-    config.merge(config::File::with_name("config.toml").required(false))?;
-    let config = config.try_into::<TaikoConfig>()?;
-    Ok(config)
+    Ok(Config::builder()
+        .add_source(Config::try_from(&TaikoConfig::default())?)
+        .add_source(config::File::with_name("config.toml").required(false))
+        .build()?
+        .try_deserialize::<TaikoConfig>()?)
 }
