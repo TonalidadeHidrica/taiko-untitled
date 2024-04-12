@@ -173,7 +173,7 @@ pub mod typed {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct LevelUra(Level, bool);
+pub struct LevelUra(#[allow(dead_code)] Level, #[allow(dead_code)] bool);
 
 #[derive(Clone, Copy, Debug)]
 pub enum Level {

@@ -27,7 +27,7 @@ pub enum TaikoErrorCause {
 }
 
 #[derive(Debug, From)]
-pub struct SdlError(String);
+pub struct SdlError(#[allow(dead_code)] String);
 
 #[derive(Debug)]
 pub enum CpalOrRodioError {

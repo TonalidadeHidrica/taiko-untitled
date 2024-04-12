@@ -69,7 +69,9 @@ impl Default for Song {
 
 #[derive(Debug)]
 pub struct Subtitle {
+    #[allow(dead_code)]
     text: String,
+    #[allow(dead_code)]
     style: SubtitleStyle,
 }
 
