@@ -9,7 +9,7 @@ pub struct ValueWithUpdateTime<T> {
 impl<T> ValueWithUpdateTime<T> {
     pub fn update<'a, F>(&'a mut self, f: F)
     where
-        F: FnOnce(&'a mut T) -> (),
+        F: FnOnce(&'a mut T),
     {
         f(&mut self.value);
         self.time = Instant::now();

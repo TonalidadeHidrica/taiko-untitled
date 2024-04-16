@@ -748,6 +748,7 @@ where
     I: Iterator<Item = &'a str>,
 {
     for line in lines {
+        #[allow(clippy::redundant_pattern_matching)]
         if let Some(remaining) = line.strip_prefix("#START") {
             let player = match remaining
                 .chars()
@@ -899,6 +900,7 @@ mod tests {
     use super::ParseFirst;
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_parse_f64() {
         assert_eq!("3.14".parse_first(), Some(3.14));
         assert_eq!("-3.14".parse_first(), Some(-3.14));

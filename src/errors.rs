@@ -19,7 +19,7 @@ pub enum TaikoErrorCause {
     SdlError(SdlError),
     SdlWindowError(WindowBuildError),
     SdlCanvasError(IntegerOrSdlError),
-    ConfigError(ConfigError),
+    ConfigError(Box<ConfigError>),
     AudioLoadError(io::Error),
     CpalOrRodioError(CpalOrRodioError),
     InvalidResourceError,
@@ -83,7 +83,7 @@ where
 {
     TaikoError {
         message: message.to_string(),
-        cause: TaikoErrorCause::ConfigError(config_error),
+        cause: TaikoErrorCause::ConfigError(Box::new(config_error)),
     }
 }
 

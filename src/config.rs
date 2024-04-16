@@ -39,9 +39,9 @@ impl Default for TaikoConfig {
 }
 
 pub fn get_config() -> Result<TaikoConfig, ConfigError> {
-    Ok(Config::builder()
+    Config::builder()
         .add_source(Config::try_from(&TaikoConfig::default())?)
         .add_source(config::File::with_name("config.toml").required(false))
         .build()?
-        .try_deserialize::<TaikoConfig>()?)
+        .try_deserialize::<TaikoConfig>()
 }

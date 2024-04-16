@@ -161,7 +161,7 @@ fn play(
     score: &Score,
     game_user_state: &mut GameUserState,
 ) -> Result<GameBreak, TaikoError> {
-    let mut game_manager = GameManager::new(&score);
+    let mut game_manager = GameManager::new(score);
     let mut sound_effect_event_watch = setup_sound_effect(event_subsystem, audio_manager, assets);
     sound_effect_event_watch.set_activated(!game_user_state.auto);
 
@@ -188,7 +188,7 @@ fn play(
             timer_subsystem,
             audio_manager,
             assets,
-            &score,
+            score,
             &mut game_manager,
             &mut sound_effect_event_watch,
             &mut auto_sent_pointer,
@@ -379,10 +379,10 @@ impl<'a> EventWatchCallback for SoundEffectCallback<'a> {
     }
 }
 
-fn setup_sound_effect<'e, 'au, 'at>(
-    event_subsystem: &'e EventSubsystem,
+fn setup_sound_effect<'au>(
+    event_subsystem: &EventSubsystem,
     audio_manager: &'au AudioManager<AutoEvent>,
-    assets: &'at Assets,
+    assets: &Assets,
 ) -> EventWatch<'au, SoundEffectCallback<'au>> {
     let sound_don = assets.chunks.sound_don.clone();
     let sound_ka = assets.chunks.sound_ka.clone();
