@@ -1,6 +1,6 @@
 use crate::errors::{CpalOrRodioError, TaikoError, TaikoErrorCause};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{ChannelCount, SampleFormat, SampleRate, Stream, StreamConfig};
+use cpal::{ChannelCount, SampleFormat, SampleRate, SizedSample, Stream, StreamConfig};
 use itertools::Itertools;
 use rodio::source::UniformSourceIterator;
 use rodio::{Decoder, Source};
@@ -282,14 +282,72 @@ fn stream_thread<T: Send + 'static>(
     );
     let error_callback = |err| eprintln!("an error occurred on stream: {:?}", err);
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            device.build_output_stream(&stream_config, state.data_callback::<f32>(), error_callback)
-        }
-        SampleFormat::I16 => {
-            device.build_output_stream(&stream_config, state.data_callback::<i16>(), error_callback)
-        }
-        SampleFormat::U16 => {
-            device.build_output_stream(&stream_config, state.data_callback::<u16>(), error_callback)
+        SampleFormat::F32 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<f32>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::F64 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<f32>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::I8 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<i8>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::I16 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<i16>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::I32 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<i32>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::I64 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<i64>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::U8 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<u8>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::U16 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<u16>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::U32 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<u32>(),
+            error_callback,
+            None,
+        ),
+        SampleFormat::U64 => device.build_output_stream(
+            &stream_config,
+            state.data_callback::<u64>(),
+            error_callback,
+            None,
+        ),
+        _ => {
+            // TODO: is this the right way?
+            return Err(TaikoError {
+                message: format!("Unsupported sample format: {sample_format:?}"),
+                cause: TaikoErrorCause::None,
+            });
         }
     };
     let stream = stream.map_err(|e| TaikoError {
@@ -367,7 +425,7 @@ impl<T> AudioThreadState<T> {
 
     fn data_callback<S>(mut self) -> impl FnMut(&mut [S], &cpal::OutputCallbackInfo)
     where
-        S: rodio::Sample,
+        S: SizedSample + cpal::FromSample<f32>,
     {
         move |output, callback_info| {
             for message in self.receiver_to_audio.try_iter() {
@@ -511,7 +569,7 @@ impl<T> AudioThreadState<T> {
                     }
                     None => false,
                 });
-                *out = S::from(&next);
+                *out = S::from_sample(next);
             }
         }
     }
